@@ -1,0 +1,42 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+
+const NAV_LINKS = [
+  { href: "/dashboard", label: "Overview" },
+  { href: "/dashboard/accounts", label: "Accounts" },
+  { href: "/dashboard/settings", label: "Settings" },
+];
+
+export default function Navbar() {
+  const pathname = usePathname();
+
+  return (
+    <nav className="border-b border-gray-200 bg-white">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <div className="flex h-16 items-center justify-between">
+          <Link href="/dashboard" className="text-xl font-bold text-indigo-600">
+            Connector
+          </Link>
+
+          <div className="flex gap-6">
+            {NAV_LINKS.map(({ href, label }) => (
+              <Link
+                key={href}
+                href={href}
+                className={`text-sm font-medium transition-colors ${
+                  pathname === href
+                    ? "text-indigo-600"
+                    : "text-gray-600 hover:text-gray-900"
+                }`}
+              >
+                {label}
+              </Link>
+            ))}
+          </div>
+        </div>
+      </div>
+    </nav>
+  );
+}
