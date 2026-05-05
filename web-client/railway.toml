@@ -1,0 +1,5 @@
+[build]
+builder = "nixpacks"
+
+[build.cache]
+paths = ["node_modules/.cache", ".next/cache"]
