@@ -1,7 +1,9 @@
 import axios from "axios";
 
+// In production the Next.js rewrite proxies /api/* to the backend,
+// so no baseURL is needed. In local dev, fall back to localhost:8000.
 const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000",
+  baseURL: process.env.NEXT_PUBLIC_API_URL || undefined,
   headers: { "Content-Type": "application/json" },
 });
 
