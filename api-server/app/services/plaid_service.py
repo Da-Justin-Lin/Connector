@@ -10,7 +10,6 @@ from app.core.config import settings
 
 _ENV_MAP = {
     "sandbox": plaid.Environment.Sandbox,
-    "development": plaid.Environment.Development,
     "production": plaid.Environment.Production,
 }
 

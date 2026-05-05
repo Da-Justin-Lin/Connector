@@ -1,0 +1,32 @@
+# ── Python ──────────────────────────────────────────────────────────────────
+.venv/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ── Environment / secrets ────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+*.pem
+
+# ── Next.js ──────────────────────────────────────────────────────────────────
+web-client/.next/
+web-client/out/
+web-client/node_modules/
+
+# ── Alembic ──────────────────────────────────────────────────────────────────
+# Keep migrations/ tracked, but not the generated pycache inside it
+api-server/alembic/__pycache__/
+
+# ── OS / editor ──────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
