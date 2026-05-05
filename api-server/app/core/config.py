@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
 
+    # Comma-separated list of allowed CORS origins
+    allowed_origins: str = "http://localhost:3000"
+
     model_config = {"env_file": ".env", "case_sensitive": False}
 
 
