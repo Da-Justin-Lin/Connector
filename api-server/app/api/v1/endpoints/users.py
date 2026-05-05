@@ -1,23 +1,37 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import get_current_user
+from app.core.database import get_db
+from app.core.security import create_access_token, hash_password, verify_password
+from app.models.user import User
 from app.schemas.user import TokenResponse, UserCreate, UserLogin, UserRead
+from app.services.user_service import create_user, get_user_by_email
 
 router = APIRouter()
 
 
-@router.post("/register", response_model=UserRead, status_code=201)
-async def register(payload: UserCreate):
-    """Register a new user. (DB layer not yet wired — implement with get_db session.)"""
-    raise HTTPException(status_code=501, detail="Not implemented")
+@router.post("/register", response_model=TokenResponse, status_code=201)
+async def register(payload: UserCreate, db: AsyncSession = Depends(get_db)):
+    if await get_user_by_email(db, payload.email):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
+    user = await create_user(db, payload.email, hash_password(payload.password))
+    return TokenResponse(access_token=create_access_token(str(user.id)))
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(payload: UserLogin):
-    """Authenticate a user and return a JWT access token."""
-    raise HTTPException(status_code=501, detail="Not implemented")
+async def login(payload: UserLogin, db: AsyncSession = Depends(get_db)):
+    user = await get_user_by_email(db, payload.email)
+    if not user or not user.hashed_password:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials" if not user else "This account uses Google sign-in",
+        )
+    if not verify_password(payload.password, user.hashed_password):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    return TokenResponse(access_token=create_access_token(str(user.id)))
 
 
 @router.get("/me", response_model=UserRead)
-async def get_me():
-    """Return the current authenticated user. Requires JWT bearer token."""
-    raise HTTPException(status_code=501, detail="Not implemented")
+async def get_me(current_user: User = Depends(get_current_user)):
+    return current_user

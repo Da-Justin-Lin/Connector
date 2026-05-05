@@ -1,6 +1,25 @@
+"use client";
+
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+
 import Navbar from "@/components/Navbar";
+import { isLoggedIn } from "@/services/authService";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
+  const [checking, setChecking] = useState(true);
+
+  useEffect(() => {
+    if (!isLoggedIn()) {
+      router.replace("/login");
+    } else {
+      setChecking(false);
+    }
+  }, [router]);
+
+  if (checking) return null;
+
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar />

@@ -9,17 +9,18 @@ class UserCreate(BaseModel):
     password: str
 
 
-class UserRead(BaseModel):
-    id: uuid.UUID
-    email: EmailStr
-    created_at: datetime
-
-    model_config = {"from_attributes": True}
-
-
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
+
+
+class UserRead(BaseModel):
+    id: uuid.UUID
+    email: EmailStr
+    google_id: str | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
 
 
 class TokenResponse(BaseModel):

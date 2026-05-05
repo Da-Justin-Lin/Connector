@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+import { logout } from "@/services/authService";
+
 const NAV_LINKS = [
   { href: "/dashboard", label: "Overview" },
   { href: "/dashboard/accounts", label: "Accounts" },
@@ -20,7 +22,7 @@ export default function Navbar() {
             Connector
           </Link>
 
-          <div className="flex gap-6">
+          <div className="flex items-center gap-6">
             {NAV_LINKS.map(({ href, label }) => (
               <Link
                 key={href}
@@ -34,6 +36,13 @@ export default function Navbar() {
                 {label}
               </Link>
             ))}
+
+            <button
+              onClick={logout}
+              className="text-sm font-medium text-gray-500 hover:text-gray-900 transition-colors"
+            >
+              Sign out
+            </button>
           </div>
         </div>
       </div>
