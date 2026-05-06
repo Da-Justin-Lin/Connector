@@ -1,6 +1,7 @@
 import plaid
 from plaid.api import plaid_api
 from plaid.model.country_code import CountryCode
+from plaid.model.investments_holdings_get_request import InvestmentsHoldingsGetRequest
 from plaid.model.item_public_token_exchange_request import ItemPublicTokenExchangeRequest
 from plaid.model.link_token_create_request import LinkTokenCreateRequest
 from plaid.model.link_token_create_request_user import LinkTokenCreateRequestUser
@@ -37,6 +38,13 @@ async def create_link_token(user_id: str) -> str:
     )
     response = client.link_token_create(request)
     return response["link_token"]
+
+
+async def fetch_holdings(access_token: str):
+    """Fetch investment holdings and securities for a given access token."""
+    client = _get_client()
+    request = InvestmentsHoldingsGetRequest(access_token=access_token)
+    return client.investments_holdings_get(request)
 
 
 async def exchange_public_token(public_token: str) -> dict:

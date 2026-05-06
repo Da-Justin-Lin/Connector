@@ -27,5 +27,23 @@ class ExchangeTokenRequest(BaseModel):
 
 
 class ExchangeTokenResponse(BaseModel):
-    access_token: str
     item_id: str
+    message: str = "Account linked successfully"
+
+
+class HoldingRead(BaseModel):
+    ticker: str | None
+    name: str | None
+    security_type: str | None
+    quantity: float
+    institution_price: float
+    market_value: float
+    cost_basis: float | None
+    account_name: str | None
+    account_type: str | None
+
+
+class HoldingsResponse(BaseModel):
+    holdings: list[HoldingRead]
+    total_value: float
+    connected_accounts: int
