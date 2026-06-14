@@ -30,10 +30,11 @@ async def create_link_token(user_id: str) -> str:
     """Create a Plaid Link token for the given internal user ID."""
     client = _get_client()
     request = LinkTokenCreateRequest(
-        products=[Products("transactions"), Products("investments")],
-        client_name="Connector",
+        products=[Products("investments")],
+        client_name="My App",
         country_codes=[CountryCode("US")],
         language="en",
+        institution_id="ins_109508",
         user=LinkTokenCreateRequestUser(client_user_id=user_id),
     )
     response = client.link_token_create(request)
