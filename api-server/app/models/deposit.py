@@ -12,6 +12,7 @@ class Deposit(Base):
     __tablename__ = "deposits"
     __table_args__ = (
         Index("ix_deposits_user_at", "user_id", "deposited_at"),
+        Index("ix_deposits_account", "investment_account_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -20,6 +21,11 @@ class Deposit(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    investment_account_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("investment_accounts.id", ondelete="CASCADE"),
         nullable=False,
     )
     amount: Mapped[float] = mapped_column(Numeric(15, 2), nullable=False)

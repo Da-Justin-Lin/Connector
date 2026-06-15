@@ -6,15 +6,42 @@ import api from "@/services/api";
 
 interface Deposit {
   id: string;
+  investment_account_id: string;
   amount: number;
   deposited_at: string;
   note: string | null;
   created_at: string;
 }
 
+interface AccountPrincipal {
+  investment_account_id: string;
+  snaptrade_account_id: string;
+  institution_name: string | null;
+  account_name: string | null;
+  total_principal: number;
+}
+
 interface DepositsResponse {
   deposits: Deposit[];
   total_principal: number;
+  per_account: AccountPrincipal[];
+}
+
+interface AccountSection {
+  snaptrade_account_id: string;
+  institution_name: string | null;
+  account_name: string | null;
+}
+
+interface HoldingsResponse {
+  accounts: AccountSection[];
+}
+
+interface InvestmentAccount {
+  id: string;
+  snaptrade_account_id: string;
+  institution_name: string | null;
+  account_name: string | null;
 }
 
 function fmt(n: number) {
@@ -27,11 +54,17 @@ function fmtDate(iso: string) {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
+function accountLabel(a: { institution_name: string | null; account_name: string | null }) {
+  return a.institution_name || a.account_name || "Brokerage Account";
+}
+
 export default function DepositsPage() {
   const [data, setData] = useState<DepositsResponse | null>(null);
+  const [accounts, setAccounts] = useState<InvestmentAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [accountId, setAccountId] = useState<string>("");
   const [amount, setAmount] = useState("");
   const [depositedAt, setDepositedAt] = useState(() => new Date().toISOString().slice(0, 10));
   const [note, setNote] = useState("");
@@ -39,9 +72,20 @@ export default function DepositsPage() {
 
   const load = () => {
     setLoading(true);
-    api
-      .get<DepositsResponse>("/api/v1/deposits")
-      .then(({ data }) => setData(data))
+    Promise.all([
+      api.get<DepositsResponse>("/api/v1/deposits"),
+      // Use the user's account-list endpoint embedded in holdings; we just need
+      // the institution+account_name+UUID, but the holdings endpoint doesn't
+      // expose UUIDs. Use the dedicated /users/me/accounts shape instead.
+      api.get<InvestmentAccount[]>("/api/v1/users/me/accounts"),
+    ])
+      .then(([depRes, accRes]) => {
+        setData(depRes.data);
+        setAccounts(accRes.data);
+        if (!accountId && accRes.data.length > 0) {
+          setAccountId(accRes.data[0].id);
+        }
+      })
       .catch(() => setError("Failed to load deposits."))
       .finally(() => setLoading(false));
   };
@@ -55,10 +99,15 @@ export default function DepositsPage() {
       setError("Amount must be greater than zero.");
       return;
     }
+    if (!accountId) {
+      setError("Pick an account.");
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
       await api.post("/api/v1/deposits", {
+        investment_account_id: accountId,
         amount: amt,
         deposited_at: new Date(depositedAt).toISOString(),
         note: note || null,
@@ -84,6 +133,8 @@ export default function DepositsPage() {
     }
   };
 
+  const accountLookup = new Map(accounts.map((a) => [a.id, a]));
+
   return (
     <div className="flex flex-col gap-8">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -96,12 +147,50 @@ export default function DepositsPage() {
         )}
       </div>
 
+      {data && data.per_account.length > 0 && (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {data.per_account.map((pa) => (
+            <div
+              key={pa.investment_account_id}
+              className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm"
+            >
+              <p className="text-xs text-gray-500">{accountLabel(pa)}</p>
+              <p className="mt-1 text-xl font-bold text-gray-900">
+                ${fmt(pa.total_principal)}
+              </p>
+              {pa.account_name && pa.institution_name && (
+                <p className="text-xs text-gray-400">{pa.account_name}</p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
       <form
         onSubmit={submit}
         className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm"
       >
         <p className="mb-4 text-sm font-medium text-gray-700">Add a deposit</p>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-5">
+          <div className="sm:col-span-2">
+            <label className="block text-xs font-medium text-gray-500">Account</label>
+            <select
+              value={accountId}
+              onChange={(e) => setAccountId(e.target.value)}
+              required
+              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+            >
+              {accounts.length === 0 && (
+                <option value="">No connected accounts</option>
+              )}
+              {accounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {accountLabel(a)}
+                  {a.account_name && a.institution_name ? ` — ${a.account_name}` : ""}
+                </option>
+              ))}
+            </select>
+          </div>
           <div>
             <label className="block text-xs font-medium text-gray-500">Amount ($)</label>
             <input
@@ -124,20 +213,20 @@ export default function DepositsPage() {
               className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
             />
           </div>
-          <div className="sm:col-span-2">
-            <label className="block text-xs font-medium text-gray-500">Note (optional)</label>
+          <div>
+            <label className="block text-xs font-medium text-gray-500">Note</label>
             <input
               type="text"
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              placeholder="e.g. ACH from Chase"
+              placeholder="optional"
               className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
             />
           </div>
         </div>
         <button
           type="submit"
-          disabled={submitting}
+          disabled={submitting || accounts.length === 0}
           className="mt-4 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
         >
           {submitting ? "Adding…" : "Add deposit"}
@@ -157,7 +246,7 @@ export default function DepositsPage() {
           <table className="min-w-full divide-y divide-gray-200 text-sm">
             <thead className="bg-gray-50">
               <tr>
-                {["Date", "Amount", "Note", ""].map((h) => (
+                {["Date", "Account", "Amount", "Note", ""].map((h) => (
                   <th
                     key={h}
                     className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500"
@@ -168,21 +257,27 @@ export default function DepositsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {data.deposits.map((d) => (
-                <tr key={d.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-3 text-gray-700">{fmtDate(d.deposited_at)}</td>
-                  <td className="px-6 py-3 font-medium text-gray-900">${fmt(d.amount)}</td>
-                  <td className="px-6 py-3 text-gray-500">{d.note ?? "—"}</td>
-                  <td className="px-6 py-3 text-right">
-                    <button
-                      onClick={() => remove(d.id)}
-                      className="text-xs font-medium text-rose-600 hover:text-rose-800"
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {data.deposits.map((d) => {
+                const acc = accountLookup.get(d.investment_account_id);
+                return (
+                  <tr key={d.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-3 text-gray-700">{fmtDate(d.deposited_at)}</td>
+                    <td className="px-6 py-3 text-gray-700">
+                      {acc ? accountLabel(acc) : "—"}
+                    </td>
+                    <td className="px-6 py-3 font-medium text-gray-900">${fmt(d.amount)}</td>
+                    <td className="px-6 py-3 text-gray-500">{d.note ?? "—"}</td>
+                    <td className="px-6 py-3 text-right">
+                      <button
+                        onClick={() => remove(d.id)}
+                        className="text-xs font-medium text-rose-600 hover:text-rose-800"
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}

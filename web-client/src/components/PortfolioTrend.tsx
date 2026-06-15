@@ -92,6 +92,18 @@ interface PortfolioReturns {
   ytd_change_pct: number | null;
 }
 
+interface Deposit {
+  id: string;
+  investment_account_id: string;
+  amount: number;
+  deposited_at: string;
+}
+
+interface DepositsResponse {
+  deposits: Deposit[];
+  total_principal: number;
+}
+
 function fmt(n: number) {
   return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
@@ -131,6 +143,77 @@ function ReturnCard({
   );
 }
 
+interface ChartPoint {
+  date: string;
+  value: number;
+  principal: number;
+  delta: number;
+  portfolioPct: number | null;
+  benchmarkPct: number | null;
+}
+
+interface CustomTooltipProps {
+  active?: boolean;
+  payload?: Array<{ payload?: ChartPoint }>;
+  label?: string | number;
+  isIntraday: boolean;
+}
+
+function CustomTooltip({ active, payload, label, isIntraday }: CustomTooltipProps) {
+  if (!active || !payload || payload.length === 0) return null;
+  const point = payload[0]?.payload;
+  if (!point) return null;
+
+  const portfolioColor =
+    point.portfolioPct == null
+      ? "text-gray-500"
+      : point.portfolioPct >= 0
+        ? "text-emerald-600"
+        : "text-rose-600";
+
+  const benchmarkColor =
+    point.benchmarkPct == null
+      ? "text-gray-500"
+      : point.benchmarkPct >= 0
+        ? "text-emerald-600"
+        : "text-rose-600";
+
+  return (
+    <div className="rounded-md border border-gray-200 bg-white px-3 py-2 text-xs shadow-md">
+      <p className="font-medium text-gray-700">
+        {formatTooltipLabel(String(label ?? ""), isIntraday)}
+      </p>
+      <div className="mt-1 space-y-0.5">
+        <p>
+          <span className="inline-block h-2 w-2 rounded-full bg-indigo-600 mr-1.5 align-middle" />
+          <span className="text-gray-600">Portfolio: </span>
+          <span className="font-semibold text-gray-900">${fmt(point.value)}</span>
+          <span className={`ml-2 font-semibold ${portfolioColor}`}>
+            {point.portfolioPct == null
+              ? ""
+              : `${point.portfolioPct >= 0 ? "+" : ""}${point.portfolioPct.toFixed(2)}%`}
+          </span>
+        </p>
+        {point.principal > 0 && (
+          <p className="text-gray-500">
+            Principal: ${fmt(point.principal)} · Δ {fmtMoney(point.delta)}
+          </p>
+        )}
+        {point.benchmarkPct != null && (
+          <p>
+            <span className="inline-block h-2 w-2 rounded-full bg-gray-400 mr-1.5 align-middle" />
+            <span className="text-gray-600">S&amp;P 500: </span>
+            <span className={`font-semibold ${benchmarkColor}`}>
+              {point.benchmarkPct >= 0 ? "+" : ""}
+              {point.benchmarkPct.toFixed(2)}%
+            </span>
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 interface PortfolioTrendProps {
   accountId?: string | null;
 }
@@ -140,6 +223,7 @@ export default function PortfolioTrend({ accountId = null }: PortfolioTrendProps
   const [history, setHistory] = useState<HistoryResponse | null>(null);
   const [benchmark, setBenchmark] = useState<BenchmarkResponse | null>(null);
   const [returns, setReturns] = useState<PortfolioReturns | null>(null);
+  const [deposits, setDeposits] = useState<Deposit[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
 
   useEffect(() => {
@@ -170,36 +254,84 @@ export default function PortfolioTrend({ accountId = null }: PortfolioTrendProps
   }, [range, accountId]);
 
   useEffect(() => {
+    const params = new URLSearchParams();
+    if (accountId) params.set("account_id", accountId);
+    const qs = params.toString();
     api
-      .get<PortfolioReturns>("/api/v1/reports/portfolio-returns")
+      .get<PortfolioReturns>(`/api/v1/reports/portfolio-returns${qs ? `?${qs}` : ""}`)
       .then(({ data }) => setReturns(data))
       .catch(() => setReturns(null));
+
+    api
+      .get<DepositsResponse>(`/api/v1/deposits${qs ? `?${qs}` : ""}`)
+      .then(({ data }) => setDeposits(data.deposits))
+      .catch(() => setDeposits([]));
   }, [accountId]);
 
-  // Merge history + benchmark into a unified time series.
-  // Both are normalized to start at 0% so they're directly comparable.
-  const chartData = useMemo(() => {
+  const chartData = useMemo<ChartPoint[]>(() => {
     const portfolio = history?.series ?? [];
     if (portfolio.length === 0) return [];
 
-    const portfolioBase = portfolio[0].total_value;
+    // Sort deposits ascending so we can use a running sum
+    const sortedDeposits = [...deposits].sort((a, b) =>
+      a.deposited_at.localeCompare(b.deposited_at),
+    );
+
+    // If a specific account is selected, only that account's deposits matter.
+    // (The deposits endpoint already filtered when accountId was passed.)
     const benchmarkPoints = benchmark?.series ?? [];
     const benchmarkBase = benchmarkPoints[0]?.value;
-
-    // Index benchmark by date (YYYY-MM-DD prefix) for lookups
     const benchmarkByDate = new Map<string, number>();
-    for (const p of benchmarkPoints) {
-      benchmarkByDate.set(p.date.slice(0, 10), p.value);
-    }
+    for (const p of benchmarkPoints) benchmarkByDate.set(p.date.slice(0, 10), p.value);
 
+    return portfolio.map((p) => {
+      const dateKey = p.date.slice(0, 10);
+      const principalAtPoint = sortedDeposits
+        .filter((d) => d.deposited_at <= p.date)
+        .reduce((sum, d) => sum + Number(d.amount), 0);
+
+      const delta = p.total_value - principalAtPoint;
+      const portfolioPct =
+        principalAtPoint > 0 ? (delta / principalAtPoint) * 100 : null;
+
+      const benchValue = benchmarkByDate.get(dateKey);
+      const benchmarkPct =
+        benchValue !== undefined && benchmarkBase
+          ? ((benchValue - benchmarkBase) / benchmarkBase) * 100
+          : null;
+
+      return {
+        date: p.date,
+        value: p.total_value,
+        principal: Math.round(principalAtPoint * 100) / 100,
+        delta: Math.round(delta * 100) / 100,
+        portfolioPct,
+        benchmarkPct,
+      };
+    });
+  }, [history, benchmark, deposits]);
+
+  const hasPrincipal = chartData.some((p) => p.principal > 0);
+  const showsPortfolioLine = hasPrincipal;
+
+  // When there's no principal data, fall back to "0% baseline = first point of range"
+  const fallbackChartData = useMemo<ChartPoint[]>(() => {
+    const portfolio = history?.series ?? [];
+    if (portfolio.length === 0) return [];
+    const base = portfolio[0].total_value;
+    const benchmarkPoints = benchmark?.series ?? [];
+    const benchmarkBase = benchmarkPoints[0]?.value;
+    const benchmarkByDate = new Map<string, number>();
+    for (const p of benchmarkPoints) benchmarkByDate.set(p.date.slice(0, 10), p.value);
     return portfolio.map((p) => {
       const dateKey = p.date.slice(0, 10);
       const benchValue = benchmarkByDate.get(dateKey);
       return {
         date: p.date,
         value: p.total_value,
-        valuePct:
-          portfolioBase > 0 ? ((p.total_value - portfolioBase) / portfolioBase) * 100 : 0,
+        principal: 0,
+        delta: p.total_value - base,
+        portfolioPct: base > 0 ? ((p.total_value - base) / base) * 100 : null,
         benchmarkPct:
           benchValue !== undefined && benchmarkBase
             ? ((benchValue - benchmarkBase) / benchmarkBase) * 100
@@ -208,24 +340,21 @@ export default function PortfolioTrend({ accountId = null }: PortfolioTrendProps
     });
   }, [history, benchmark]);
 
+  const displayedData = showsPortfolioLine ? chartData : fallbackChartData;
+
   const allTimeTone =
-    returns == null
-      ? "default"
-      : returns.all_time_return >= 0
-        ? "up"
-        : "down";
+    returns == null ? "default" : returns.all_time_return >= 0 ? "up" : "down";
   const dayTone =
-    returns?.day_change == null
-      ? "default"
-      : returns.day_change >= 0
-        ? "up"
-        : "down";
+    returns?.day_change == null ? "default" : returns.day_change >= 0 ? "up" : "down";
   const ytdTone =
-    returns?.ytd_change == null
-      ? "default"
-      : returns.ytd_change >= 0
-        ? "up"
-        : "down";
+    returns?.ytd_change == null ? "default" : returns.ytd_change >= 0 ? "up" : "down";
+
+  const currentValueDisplay =
+    displayedData.length > 0
+      ? `$${fmt(displayedData[displayedData.length - 1].value)}`
+      : returns
+        ? `$${fmt(returns.current_value)}`
+        : "—";
 
   return (
     <div className="flex flex-col gap-6">
@@ -255,12 +384,17 @@ export default function PortfolioTrend({ accountId = null }: PortfolioTrendProps
       <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
           <div>
-            <p className="text-sm text-gray-500">Portfolio Trend vs S&amp;P 500</p>
-            {chartData.length > 0 && (
-              <p className="mt-1 text-2xl font-bold text-gray-900">
-                ${fmt(chartData[chartData.length - 1].value)}
-              </p>
-            )}
+            <p className="text-sm text-gray-500">
+              Portfolio Trend vs S&amp;P 500{" "}
+              {showsPortfolioLine ? (
+                <span className="text-xs text-gray-400">(baseline = your principal)</span>
+              ) : (
+                <span className="text-xs text-gray-400">
+                  (add deposits to baseline against principal)
+                </span>
+              )}
+            </p>
+            <p className="mt-1 text-2xl font-bold text-gray-900">{currentValueDisplay}</p>
           </div>
           <div className="flex gap-1 rounded-lg bg-gray-100 p-1">
             {RANGES.map((r) => (
@@ -288,13 +422,13 @@ export default function PortfolioTrend({ accountId = null }: PortfolioTrendProps
             <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-sm text-gray-500">
               <p>{history.message ?? "Historical data is not available yet."}</p>
             </div>
-          ) : chartData.length === 0 ? (
+          ) : displayedData.length === 0 ? (
             <div className="flex h-full items-center justify-center text-center text-sm text-gray-400">
               {history?.message ?? "No data points in this range yet."}
             </div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData} margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
+              <LineChart data={displayedData} margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
                 <XAxis
                   dataKey="date"
@@ -305,7 +439,6 @@ export default function PortfolioTrend({ accountId = null }: PortfolioTrendProps
                   tickFormatter={(v: string) => formatXTick(v, range === "1D")}
                 />
                 <YAxis
-                  yAxisId="pct"
                   tick={{ fontSize: 11, fill: "#9ca3af" }}
                   tickLine={false}
                   axisLine={false}
@@ -313,36 +446,19 @@ export default function PortfolioTrend({ accountId = null }: PortfolioTrendProps
                   width={56}
                 />
                 <Tooltip
-                  formatter={(value, name) => {
-                    if (value == null || (typeof value === "number" && isNaN(value))) {
-                      return ["—", name as string];
-                    }
-                    const pct = Number(value);
-                    const sign = pct >= 0 ? "+" : "";
-                    return [`${sign}${pct.toFixed(2)}%`, name as string];
-                  }}
-                  labelFormatter={(label) =>
-                    formatTooltipLabel(String(label ?? ""), range === "1D")
-                  }
-                  labelStyle={{ color: "#374151", fontSize: 12 }}
-                  contentStyle={{
-                    borderRadius: 8,
-                    border: "1px solid #e5e7eb",
-                    fontSize: 12,
-                  }}
+                  content={<CustomTooltip isIntraday={range === "1D"} />}
                 />
                 <Legend wrapperStyle={{ fontSize: 12 }} iconType="line" />
                 <Line
-                  yAxisId="pct"
                   type="monotone"
-                  dataKey="valuePct"
+                  dataKey="portfolioPct"
                   name="Portfolio"
                   stroke="#4f46e5"
                   strokeWidth={2}
                   dot={false}
+                  connectNulls
                 />
                 <Line
-                  yAxisId="pct"
                   type="monotone"
                   dataKey="benchmarkPct"
                   name="S&P 500"

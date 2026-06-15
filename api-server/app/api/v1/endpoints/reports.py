@@ -1,4 +1,5 @@
 import logging
+import uuid
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends
@@ -72,22 +73,32 @@ def _current_portfolio_value(account_ids: list[str]) -> float:
 
 @router.get("/portfolio-returns", response_model=PortfolioReturns)
 async def get_portfolio_returns(
+    account_id: str | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    # 1. Live portfolio value across all connected accounts
-    account_rows = await db.execute(
-        select(InvestmentAccount).where(InvestmentAccount.user_id == current_user.id)
-    )
+    # 1. Live portfolio value (filtered if account_id is set)
+    stmt = select(InvestmentAccount).where(InvestmentAccount.user_id == current_user.id)
+    if account_id:
+        stmt = stmt.where(InvestmentAccount.snaptrade_account_id == account_id)
+    account_rows = await db.execute(stmt)
     accounts = account_rows.scalars().all()
-    account_ids = [a.snaptrade_account_id for a in accounts]
-    current_value = _current_portfolio_value(account_ids) if account_ids else 0.0
+    account_uuids = [a.id for a in accounts]
+    snaptrade_ids = [a.snaptrade_account_id for a in accounts]
 
-    # 2. Total principal = sum of all deposits
-    deposit_rows = await db.execute(
-        select(Deposit).where(Deposit.user_id == current_user.id)
-    )
-    deposits = deposit_rows.scalars().all()
+    current_value = _current_portfolio_value(snaptrade_ids) if snaptrade_ids else 0.0
+
+    # 2. Total principal = sum of deposits to the matching accounts
+    if account_uuids:
+        deposit_rows = await db.execute(
+            select(Deposit).where(
+                Deposit.user_id == current_user.id,
+                Deposit.investment_account_id.in_(account_uuids),
+            )
+        )
+        deposits = deposit_rows.scalars().all()
+    else:
+        deposits = []
     total_principal = round(sum(float(d.amount) for d in deposits), 2)
 
     all_time_return = round(current_value - total_principal, 2)
@@ -95,7 +106,9 @@ async def get_portfolio_returns(
         round(all_time_return / total_principal, 6) if total_principal > 0 else 0.0
     )
 
-    # 3. 1D change — earliest snapshot in the last 24h
+    # 3. 1D change — compares to earliest snapshot in last 24h.
+    # Snapshots are aggregated across all accounts (we don't snapshot per-account),
+    # so the 1D number for a filtered view is approximate.
     now = datetime.now(timezone.utc)
     day_change: float | None = None
     day_change_pct: float | None = None
@@ -109,17 +122,12 @@ async def get_portfolio_returns(
         .limit(1)
     )
     earliest_today = snap_row.scalar_one_or_none()
-    if earliest_today and current_value:
+    if earliest_today and current_value and not account_id:
         start_val = float(earliest_today.total_value)
         day_change = round(current_value - start_val, 2)
         day_change_pct = round(day_change / start_val, 6) if start_val else None
 
-    # 4. YTD — deposits-adjusted change since Jan 1.
-    # Without daily snapshots stretching back, we approximate by:
-    # YTD return = (current_value - YTD_deposits) / YTD_deposits ... but principal
-    # is what we paid in. Cleaner: compare current_value to (start_of_year_value +
-    # deposits_made_this_year). If we have no snapshot before Jan 1, fall back to
-    # all-time principal.
+    # 4. YTD — deposits-adjusted
     year_start = datetime(now.year, 1, 1, tzinfo=timezone.utc)
     ytd_deposits = round(
         sum(float(d.amount) for d in deposits if d.deposited_at >= year_start), 2
@@ -128,7 +136,6 @@ async def get_portfolio_returns(
     ytd_change_pct: float | None = None
     pre_year_principal = round(total_principal - ytd_deposits, 2)
     if pre_year_principal > 0:
-        # Return relative to what was invested at start of year + new money added
         invested_basis = pre_year_principal + ytd_deposits
         ytd_change = round(current_value - invested_basis, 2)
         ytd_change_pct = (
@@ -150,7 +157,7 @@ async def get_portfolio_returns(
 _BENCHMARK_RANGES: dict[str, CandleRange] = {
     "1m": "1M",
     "3m": "3M",
-    "6m": "1Y",   # yfinance has no 6M preset; use 1Y and trim client-side
+    "6m": "1Y",
     "ytd": "1Y",
     "1y": "1Y",
     "1d": "1D",
@@ -189,19 +196,13 @@ async def get_benchmark(
             message="No benchmark data in this range.",
         )
 
-    series = [
-        BenchmarkPoint(
-            date=datetime.fromtimestamp(c["t"], tz=timezone.utc)
-            .date()
-            .isoformat()
-            if yf_range not in ("1D", "1W")
-            else datetime.fromtimestamp(c["t"], tz=timezone.utc).isoformat(),
-            value=float(c["c"]),
-        )
-        for c in candles
-    ]
+    is_intraday = yf_range in ("1D", "1W")
+    series = []
+    for c in candles:
+        ts = datetime.fromtimestamp(c["t"], tz=timezone.utc)
+        date_str = ts.isoformat() if is_intraday else ts.date().isoformat()
+        series.append(BenchmarkPoint(date=date_str, value=float(c["c"])))
 
-    # Trim for YTD / 6M which don't have native yfinance presets
     if range_key == "ytd":
         year_prefix = str(datetime.now(timezone.utc).year)
         series = [p for p in series if p.date.startswith(year_prefix)]
@@ -218,25 +219,57 @@ async def get_benchmark(
     )
 
 
-def _classify_action(activity: dict) -> str:
-    raw = (
-        activity.get("type")
-        or activity.get("action")
-        or activity.get("activity_type")
-        or ""
-    )
-    return str(raw).upper()
+def _is_buy(action: str, description: str) -> bool:
+    a = (action or "").lower()
+    d = (description or "").lower()
+    if "buy" in a or "purchase" in a or "bought" in a:
+        return True
+    if "buy" in d or "bought" in d:
+        return True
+    return False
+
+
+def _is_sell(action: str, description: str) -> bool:
+    a = (action or "").lower()
+    d = (description or "").lower()
+    if "sell" in a or "sold" in a:
+        return True
+    if "sell" in d or "sold" in d:
+        return True
+    return False
+
+
+def _extract_symbol_and_description(act: dict) -> tuple[str | None, str | None]:
+    """SnapTrade activity payloads vary; the instrument can sit under
+    `symbol`, `instrument`, or appear as a top-level string."""
+    instrument = act.get("symbol") or act.get("instrument") or {}
+    if isinstance(instrument, dict):
+        symbol = (
+            instrument.get("symbol")
+            or instrument.get("raw_symbol")
+            or instrument.get("ticker")
+        )
+        if isinstance(symbol, dict):
+            symbol = symbol.get("symbol") or symbol.get("raw_symbol")
+        description = instrument.get("description") or instrument.get("name")
+    else:
+        symbol = str(instrument) if instrument else None
+        description = None
+    if not description:
+        description = act.get("description")
+    return symbol, description
 
 
 @router.get("/weekly-trades", response_model=WeeklyReportResponse)
 async def get_weekly_trades(
+    days: int = 7,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    days = max(1, min(days, 90))  # safety bound
     today = date.today()
-    week_start = today - timedelta(days=7)
+    window_start = today - timedelta(days=days)
 
-    # Fetch live trade activities
     account_rows = await db.execute(
         select(InvestmentAccount).where(InvestmentAccount.user_id == current_user.id)
     )
@@ -247,37 +280,40 @@ async def get_weekly_trades(
     total_buys = 0.0
     total_sells = 0.0
     fetch_failed = False
+    debug_msg: str | None = None
 
     if account_ids:
         try:
             activities = fetch_activities(
-                start_date=week_start.isoformat(),
+                start_date=window_start.isoformat(),
                 end_date=today.isoformat(),
                 account_ids=account_ids,
             )
+            logger.info("Fetched %d activities from SnapTrade", len(activities))
         except Exception as exc:
             logger.warning("Weekly trades fetch failed: %s", exc)
             activities = []
             fetch_failed = True
 
+        skipped_types: dict[str, int] = {}
         for act in activities:
             if not isinstance(act, dict):
                 continue
-            action = _classify_action(act)
-            if action not in ("BUY", "SELL"):
-                continue
 
-            instrument = act.get("symbol") or act.get("instrument") or {}
-            if isinstance(instrument, dict):
-                symbol = (
-                    instrument.get("symbol")
-                    or instrument.get("raw_symbol")
-                    or instrument.get("ticker")
-                )
-                description = instrument.get("description")
-            else:
-                symbol = str(instrument)
-                description = None
+            action = str(
+                act.get("type")
+                or act.get("action")
+                or act.get("activity_type")
+                or ""
+            )
+            symbol, description = _extract_symbol_and_description(act)
+
+            is_buy = _is_buy(action, description or "")
+            is_sell = _is_sell(action, description or "")
+
+            if not (is_buy or is_sell):
+                skipped_types[action] = skipped_types.get(action, 0) + 1
+                continue
 
             try:
                 units = float(act.get("units") or 0)
@@ -294,32 +330,44 @@ async def get_weekly_trades(
             )
             trade_date_str = str(trade_date_raw)[:10]
 
+            normalized_action = "BUY" if is_buy else "SELL"
             trades.append(
                 TradeRow(
                     trade_date=trade_date_str,
                     symbol=symbol,
                     description=description,
-                    action=action,
+                    action=normalized_action,
                     units=units,
                     price=price,
                     amount=round(amount, 2),
                 )
             )
             notional = abs(amount) if amount else round(units * price, 2)
-            if action == "BUY":
+            if is_buy:
                 total_buys += notional
             else:
                 total_sells += notional
 
+        if not trades and activities:
+            top_types = sorted(
+                skipped_types.items(), key=lambda x: x[1], reverse=True
+            )[:3]
+            debug_msg = (
+                f"Pulled {len(activities)} activities, none classified as trades. "
+                f"Top non-trade types: {', '.join(t for t, _ in top_types) or 'unknown'}."
+            )
+
     trades.sort(key=lambda t: t.trade_date, reverse=True)
 
-    # Compute week P/L using snapshots + deposits
-    week_start_dt = datetime.combine(week_start, datetime.min.time(), tzinfo=timezone.utc)
+    # Compute window P/L using snapshots + deposits in the same window
+    window_start_dt = datetime.combine(
+        window_start, datetime.min.time(), tzinfo=timezone.utc
+    )
     snap_start_row = await db.execute(
         select(PortfolioSnapshot)
         .where(
             PortfolioSnapshot.user_id == current_user.id,
-            PortfolioSnapshot.snapshot_at >= week_start_dt,
+            PortfolioSnapshot.snapshot_at >= window_start_dt,
         )
         .order_by(PortfolioSnapshot.snapshot_at.asc())
         .limit(1)
@@ -333,43 +381,43 @@ async def get_weekly_trades(
     first_snap = snap_start_row.scalar_one_or_none()
     last_snap = snap_end_row.scalar_one_or_none()
 
-    week_start_value = float(first_snap.total_value) if first_snap else None
-    week_end_value = float(last_snap.total_value) if last_snap else None
+    window_start_value = float(first_snap.total_value) if first_snap else None
+    window_end_value = float(last_snap.total_value) if last_snap else None
 
     deposit_rows = await db.execute(
         select(Deposit).where(
             Deposit.user_id == current_user.id,
-            Deposit.deposited_at >= week_start_dt,
+            Deposit.deposited_at >= window_start_dt,
         )
     )
-    week_deposits = round(
+    window_deposits = round(
         sum(float(d.amount) for d in deposit_rows.scalars().all()), 2
     )
 
     week_pnl: float | None = None
     week_pnl_pct: float | None = None
-    if week_start_value is not None and week_end_value is not None:
-        week_pnl = round(week_end_value - week_start_value - week_deposits, 2)
-        denom = week_start_value + week_deposits
+    if window_start_value is not None and window_end_value is not None:
+        week_pnl = round(window_end_value - window_start_value - window_deposits, 2)
+        denom = window_start_value + window_deposits
         if denom > 0:
             week_pnl_pct = round(week_pnl / denom, 6)
 
+    message = debug_msg
+    if fetch_failed:
+        message = "Could not fetch trade history from SnapTrade."
+
     return WeeklyReportResponse(
-        week_start=week_start.isoformat(),
+        week_start=window_start.isoformat(),
         week_end=today.isoformat(),
         trades=trades,
         total_buys=round(total_buys, 2),
         total_sells=round(total_sells, 2),
         net_cash_flow=round(total_sells - total_buys, 2),
-        week_start_value=week_start_value,
-        week_end_value=week_end_value,
-        week_deposits=week_deposits,
+        week_start_value=window_start_value,
+        week_end_value=window_end_value,
+        week_deposits=window_deposits,
         week_pnl=week_pnl,
         week_pnl_pct=week_pnl_pct,
         available=not fetch_failed,
-        message=(
-            "Could not fetch trade history from SnapTrade."
-            if fetch_failed
-            else None
-        ),
+        message=message,
     )
