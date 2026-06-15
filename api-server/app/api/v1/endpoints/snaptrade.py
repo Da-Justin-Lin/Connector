@@ -114,12 +114,14 @@ def _extract_cash(balance_payload: dict | list) -> float:
 
 @router.get("/holdings", response_model=HoldingsResponse)
 async def get_holdings(
+    account_id: str | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    account_rows = await db.execute(
-        select(InvestmentAccount).where(InvestmentAccount.user_id == current_user.id)
-    )
+    stmt = select(InvestmentAccount).where(InvestmentAccount.user_id == current_user.id)
+    if account_id:
+        stmt = stmt.where(InvestmentAccount.snaptrade_account_id == account_id)
+    account_rows = await db.execute(stmt)
     accounts = account_rows.scalars().all()
 
     if not accounts:
@@ -228,6 +230,7 @@ def _normalize_history_entry(entry: dict) -> tuple[str, float] | None:
 @router.get("/history", response_model=HistoryResponse)
 async def get_history(
     range: str = "1y",
+    account_id: str | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -235,9 +238,10 @@ async def get_history(
     if range_key not in _RANGE_TO_DAYS:
         range_key = "1y"
 
-    account_rows = await db.execute(
-        select(InvestmentAccount).where(InvestmentAccount.user_id == current_user.id)
-    )
+    stmt = select(InvestmentAccount).where(InvestmentAccount.user_id == current_user.id)
+    if account_id:
+        stmt = stmt.where(InvestmentAccount.snaptrade_account_id == account_id)
+    account_rows = await db.execute(stmt)
     accounts = account_rows.scalars().all()
 
     if not accounts:
@@ -292,12 +296,14 @@ async def get_history(
 
 @router.get("/returns", response_model=ReturnsResponse)
 async def get_returns(
+    account_id: str | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    account_rows = await db.execute(
-        select(InvestmentAccount).where(InvestmentAccount.user_id == current_user.id)
-    )
+    stmt = select(InvestmentAccount).where(InvestmentAccount.user_id == current_user.id)
+    if account_id:
+        stmt = stmt.where(InvestmentAccount.snaptrade_account_id == account_id)
+    account_rows = await db.execute(stmt)
     accounts = account_rows.scalars().all()
 
     if not accounts:
