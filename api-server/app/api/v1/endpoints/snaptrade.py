@@ -7,6 +7,7 @@ from app.core.database import get_db
 from app.models.investment_account import InvestmentAccount
 from app.models.user import User
 from app.schemas.investment_account import (
+    AccountSection,
     ConnectionUrlResponse,
     HoldingRead,
     HoldingsResponse,
@@ -14,6 +15,7 @@ from app.schemas.investment_account import (
 )
 from app.services.snaptrade_service import (
     create_connection_portal_url,
+    fetch_account_balance,
     fetch_account_positions,
     list_accounts,
 )
@@ -84,6 +86,27 @@ async def sync_accounts(
     return SyncAccountsResponse(accounts_synced=synced)
 
 
+def _extract_cash(balance_payload: dict | list) -> float:
+    """SnapTrade balance responses come as either a list of currency entries
+    (one per currency) or a dict with the same. Sum the USD-equivalent cash."""
+    entries: list = []
+    if isinstance(balance_payload, list):
+        entries = balance_payload
+    elif isinstance(balance_payload, dict):
+        entries = balance_payload.get("results") or balance_payload.get("balances") or []
+
+    total = 0.0
+    for entry in entries:
+        cash = entry.get("cash") if isinstance(entry, dict) else None
+        if cash is None:
+            continue
+        try:
+            total += float(cash)
+        except (TypeError, ValueError):
+            continue
+    return round(total, 2)
+
+
 @router.get("/holdings", response_model=HoldingsResponse)
 async def get_holdings(
     current_user: User = Depends(get_current_user),
@@ -95,17 +118,21 @@ async def get_holdings(
     accounts = account_rows.scalars().all()
 
     if not accounts:
-        return HoldingsResponse(holdings=[], total_value=0.0, connected_accounts=0)
+        return HoldingsResponse(
+            accounts=[], total_value=0.0, total_cash=0.0, connected_accounts=0
+        )
 
-    all_holdings: list[HoldingRead] = []
+    sections: list[AccountSection] = []
 
     for account in accounts:
-        try:
-            data = fetch_account_positions(account.snaptrade_account_id)
-        except Exception:
-            continue
+        holdings: list[HoldingRead] = []
 
-        positions = data.get("results") or data.get("positions") or []
+        try:
+            positions_payload = fetch_account_positions(account.snaptrade_account_id)
+            positions = positions_payload.get("results") or positions_payload.get("positions") or []
+        except Exception:
+            positions = []
+
         for pos in positions:
             instrument = pos.get("instrument") or {}
             ticker = instrument.get("symbol") or instrument.get("raw_symbol")
@@ -121,7 +148,7 @@ async def get_holdings(
                 else None
             )
 
-            all_holdings.append(
+            holdings.append(
                 HoldingRead(
                     ticker=ticker,
                     name=name,
@@ -130,14 +157,35 @@ async def get_holdings(
                     institution_price=price,
                     market_value=round(quantity * price, 2),
                     cost_basis=cost_basis,
-                    account_name=account.account_name,
-                    account_type=account.account_type,
                 )
             )
 
-    total = round(sum(h.market_value for h in all_holdings), 2)
+        try:
+            balance_payload = fetch_account_balance(account.snaptrade_account_id)
+            cash = _extract_cash(balance_payload)
+        except Exception:
+            cash = 0.0
+
+        holdings_value = round(sum(h.market_value for h in holdings), 2)
+        sections.append(
+            AccountSection(
+                snaptrade_account_id=account.snaptrade_account_id,
+                institution_name=account.institution_name,
+                account_name=account.account_name,
+                account_type=account.account_type,
+                cash=cash,
+                holdings_value=holdings_value,
+                total_value=round(holdings_value + cash, 2),
+                holdings=holdings,
+            )
+        )
+
+    total_value = round(sum(s.total_value for s in sections), 2)
+    total_cash = round(sum(s.cash for s in sections), 2)
+
     return HoldingsResponse(
-        holdings=all_holdings,
-        total_value=total,
+        accounts=sections,
+        total_value=total_value,
+        total_cash=total_cash,
         connected_accounts=len(accounts),
     )

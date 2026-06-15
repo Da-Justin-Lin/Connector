@@ -33,11 +33,21 @@ class HoldingRead(BaseModel):
     institution_price: float
     market_value: float
     cost_basis: float | None
+
+
+class AccountSection(BaseModel):
+    snaptrade_account_id: str
+    institution_name: str | None
     account_name: str | None
     account_type: str | None
+    cash: float
+    holdings_value: float
+    total_value: float
+    holdings: list[HoldingRead]
 
 
 class HoldingsResponse(BaseModel):
-    holdings: list[HoldingRead]
+    accounts: list[AccountSection]
     total_value: float
+    total_cash: float
     connected_accounts: int

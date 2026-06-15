@@ -46,3 +46,14 @@ def fetch_account_positions(account_id: str) -> dict:
         account_id=account_id,
     )
     return response.body
+
+
+def fetch_account_balance(account_id: str) -> dict | list:
+    """Fetch cash + buying power per currency for a single brokerage account."""
+    user_id, user_secret = _creds()
+    response = _client().account_information.get_user_account_balance(
+        user_id=user_id,
+        user_secret=user_secret,
+        account_id=account_id,
+    )
+    return response.body
