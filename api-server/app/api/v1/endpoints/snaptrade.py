@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -5,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user
 from app.core.database import get_db
 from app.models.investment_account import InvestmentAccount
+from app.models.portfolio_snapshot import PortfolioSnapshot
 from app.models.user import User
 from app.schemas.investment_account import (
     AccountSection,
@@ -205,6 +208,7 @@ _RANGE_TO_DAYS = {
     "ytd": None,  # filter applied separately
     "1y": 366,
 }
+_INTRADAY_RANGE = "1d"
 
 
 def _normalize_history_entry(entry: dict) -> tuple[str, float] | None:
@@ -227,6 +231,33 @@ def _normalize_history_entry(entry: dict) -> tuple[str, float] | None:
         return None
 
 
+async def _get_intraday_history(
+    db: AsyncSession, user_id
+) -> HistoryResponse:
+    """Serve the 1D range from our portfolio_snapshots table."""
+    since = datetime.now(timezone.utc) - timedelta(hours=24)
+    rows = await db.execute(
+        select(PortfolioSnapshot)
+        .where(
+            PortfolioSnapshot.user_id == user_id,
+            PortfolioSnapshot.snapshot_at >= since,
+        )
+        .order_by(PortfolioSnapshot.snapshot_at.asc())
+    )
+    snapshots = rows.scalars().all()
+    if not snapshots:
+        return HistoryResponse(
+            series=[],
+            available=True,
+            message="Intraday data starts appearing during the next US market session.",
+        )
+    series = [
+        HistoryPoint(date=s.snapshot_at.isoformat(), total_value=float(s.total_value))
+        for s in snapshots
+    ]
+    return HistoryResponse(series=series, available=True, message=None)
+
+
 @router.get("/history", response_model=HistoryResponse)
 async def get_history(
     range: str = "1y",
@@ -235,6 +266,10 @@ async def get_history(
     db: AsyncSession = Depends(get_db),
 ):
     range_key = (range or "1y").lower()
+
+    if range_key == _INTRADAY_RANGE:
+        return await _get_intraday_history(db, current_user.id)
+
     if range_key not in _RANGE_TO_DAYS:
         range_key = "1y"
 

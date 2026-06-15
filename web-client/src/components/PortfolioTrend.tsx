@@ -13,15 +13,53 @@ import {
 
 import api from "@/services/api";
 
-type Range = "1M" | "3M" | "6M" | "YTD" | "1Y";
+type Range = "1D" | "1M" | "3M" | "6M" | "YTD" | "1Y";
 
 const RANGES: { label: Range; query: string }[] = [
+  { label: "1D", query: "1d" },
   { label: "1M", query: "1m" },
   { label: "3M", query: "3m" },
   { label: "6M", query: "6m" },
   { label: "YTD", query: "ytd" },
   { label: "1Y", query: "1y" },
 ];
+
+function formatXTick(value: string, isIntraday: boolean) {
+  if (!value) return "";
+  if (isIntraday) {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return value;
+    return d.toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+  }
+  // Daily SnapTrade rows arrive as "YYYY-MM-DD" — show "MMM D"
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function formatTooltipLabel(value: string, isIntraday: boolean) {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return isIntraday
+    ? d.toLocaleString("en-US", {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      })
+    : d.toLocaleDateString("en-US", {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+}
 
 interface HistoryPoint {
   date: string;
@@ -158,8 +196,8 @@ export default function PortfolioTrend({ accountId = null }: PortfolioTrendProps
             </p>
           </div>
         ) : chartData.length === 0 ? (
-          <div className="flex h-full items-center justify-center text-sm text-gray-400">
-            No data points in this range yet.
+          <div className="flex h-full items-center justify-center text-center text-sm text-gray-400">
+            {history?.message ?? "No data points in this range yet."}
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
@@ -171,6 +209,7 @@ export default function PortfolioTrend({ accountId = null }: PortfolioTrendProps
                 tickLine={false}
                 axisLine={false}
                 minTickGap={32}
+                tickFormatter={(v: string) => formatXTick(v, range === "1D")}
               />
               <YAxis
                 tick={{ fontSize: 11, fill: "#9ca3af" }}
@@ -181,6 +220,7 @@ export default function PortfolioTrend({ accountId = null }: PortfolioTrendProps
               />
               <Tooltip
                 formatter={(value) => [`$${fmt(Number(value))}`, "Total"]}
+                labelFormatter={(label) => formatTooltipLabel(String(label ?? ""), range === "1D")}
                 labelStyle={{ color: "#374151", fontSize: 12 }}
                 contentStyle={{
                   borderRadius: 8,
