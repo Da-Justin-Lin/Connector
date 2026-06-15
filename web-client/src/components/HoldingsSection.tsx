@@ -115,18 +115,27 @@ function AccountCard({ section }: { section: AccountSection }) {
   );
 }
 
-export default function HoldingsSection() {
+interface HoldingsSectionProps {
+  accountId?: string | null;
+}
+
+export default function HoldingsSection({ accountId = null }: HoldingsSectionProps) {
   const [data, setData] = useState<HoldingsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    setLoading(true);
+    setError(null);
+    const params = new URLSearchParams();
+    if (accountId) params.set("account_id", accountId);
+    const qs = params.toString();
     api
-      .get<HoldingsData>("/api/v1/snaptrade/holdings")
+      .get<HoldingsData>(`/api/v1/snaptrade/holdings${qs ? `?${qs}` : ""}`)
       .then(({ data }) => setData(data))
       .catch(() => setError("Failed to load holdings."))
       .finally(() => setLoading(false));
-  }, []);
+  }, [accountId]);
 
   const totalValue = data ? `$${fmt(data.total_value)}` : "—";
   const totalCash = data ? `$${fmt(data.total_cash)}` : "—";

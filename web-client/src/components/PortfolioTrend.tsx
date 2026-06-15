@@ -66,7 +66,11 @@ function ReturnPill({ label, rate }: { label: string; rate: number | undefined }
   );
 }
 
-export default function PortfolioTrend() {
+interface PortfolioTrendProps {
+  accountId?: string | null;
+}
+
+export default function PortfolioTrend({ accountId = null }: PortfolioTrendProps) {
   const [range, setRange] = useState<Range>("1Y");
   const [history, setHistory] = useState<HistoryResponse | null>(null);
   const [returns, setReturns] = useState<ReturnsResponse | null>(null);
@@ -74,24 +78,29 @@ export default function PortfolioTrend() {
 
   useEffect(() => {
     setHistoryLoading(true);
-    const query = RANGES.find((r) => r.label === range)?.query || "1y";
+    const rangeQuery = RANGES.find((r) => r.label === range)?.query || "1y";
+    const params = new URLSearchParams({ range: rangeQuery });
+    if (accountId) params.set("account_id", accountId);
     api
-      .get<HistoryResponse>(`/api/v1/snaptrade/history?range=${query}`)
+      .get<HistoryResponse>(`/api/v1/snaptrade/history?${params.toString()}`)
       .then(({ data }) => setHistory(data))
       .catch(() =>
         setHistory({ series: [], available: false, message: "Failed to load history." }),
       )
       .finally(() => setHistoryLoading(false));
-  }, [range]);
+  }, [range, accountId]);
 
   useEffect(() => {
+    const params = new URLSearchParams();
+    if (accountId) params.set("account_id", accountId);
+    const qs = params.toString();
     api
-      .get<ReturnsResponse>("/api/v1/snaptrade/returns")
+      .get<ReturnsResponse>(`/api/v1/snaptrade/returns${qs ? `?${qs}` : ""}`)
       .then(({ data }) => setReturns(data))
       .catch(() =>
         setReturns({ rates: {}, available: false, message: "Failed to load returns." }),
       );
-  }, []);
+  }, [accountId]);
 
   const chartData = useMemo(
     () => history?.series.map((p) => ({ date: p.date, value: p.total_value })) ?? [],
