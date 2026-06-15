@@ -9,14 +9,19 @@ from app.models.user import User
 from app.schemas.investment_account import (
     AccountSection,
     ConnectionUrlResponse,
+    HistoryPoint,
+    HistoryResponse,
     HoldingRead,
     HoldingsResponse,
+    ReturnsResponse,
     SyncAccountsResponse,
 )
 from app.services.snaptrade_service import (
     create_connection_portal_url,
     fetch_account_balance,
     fetch_account_positions,
+    fetch_balance_history,
+    fetch_return_rates,
     list_accounts,
 )
 
@@ -189,3 +194,169 @@ async def get_holdings(
         total_cash=total_cash,
         connected_accounts=len(accounts),
     )
+
+
+_RANGE_TO_DAYS = {
+    "1m": 31,
+    "3m": 92,
+    "6m": 183,
+    "ytd": None,  # filter applied separately
+    "1y": 366,
+}
+
+
+def _normalize_history_entry(entry: dict) -> tuple[str, float] | None:
+    """Pull (date_str, value) from a SnapTrade balance-history row.
+    Returns None if shape is unrecognized."""
+    if not isinstance(entry, dict):
+        return None
+    date_val = entry.get("date") or entry.get("as_of") or entry.get("timestamp")
+    value_val = (
+        entry.get("total_value")
+        or entry.get("value")
+        or entry.get("balance")
+        or entry.get("equity")
+    )
+    if date_val is None or value_val is None:
+        return None
+    try:
+        return str(date_val), float(value_val)
+    except (TypeError, ValueError):
+        return None
+
+
+@router.get("/history", response_model=HistoryResponse)
+async def get_history(
+    range: str = "1y",
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    range_key = (range or "1y").lower()
+    if range_key not in _RANGE_TO_DAYS:
+        range_key = "1y"
+
+    account_rows = await db.execute(
+        select(InvestmentAccount).where(InvestmentAccount.user_id == current_user.id)
+    )
+    accounts = account_rows.scalars().all()
+
+    if not accounts:
+        return HistoryResponse(series=[], available=True, message=None)
+
+    aggregated: dict[str, float] = {}
+    any_success = False
+    last_error: str | None = None
+
+    for account in accounts:
+        try:
+            payload = fetch_balance_history(account.snaptrade_account_id)
+        except Exception as exc:
+            last_error = str(exc)
+            continue
+
+        any_success = True
+        rows: list = []
+        if isinstance(payload, list):
+            rows = payload
+        elif isinstance(payload, dict):
+            rows = payload.get("results") or payload.get("history") or []
+
+        for row in rows:
+            parsed = _normalize_history_entry(row)
+            if parsed is None:
+                continue
+            date_str, value = parsed
+            aggregated[date_str] = aggregated.get(date_str, 0.0) + value
+
+    if not any_success and last_error:
+        return HistoryResponse(
+            series=[],
+            available=False,
+            message="Historical balance data is not enabled on your SnapTrade plan yet.",
+        )
+
+    sorted_dates = sorted(aggregated.keys())
+
+    if range_key == "ytd":
+        year_prefix = sorted_dates[-1][:4] if sorted_dates else ""
+        filtered_dates = [d for d in sorted_dates if d.startswith(year_prefix)]
+    else:
+        days = _RANGE_TO_DAYS[range_key]
+        filtered_dates = sorted_dates[-days:] if days else sorted_dates
+
+    series = [
+        HistoryPoint(date=d, total_value=round(aggregated[d], 2)) for d in filtered_dates
+    ]
+    return HistoryResponse(series=series, available=True, message=None)
+
+
+@router.get("/returns", response_model=ReturnsResponse)
+async def get_returns(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    account_rows = await db.execute(
+        select(InvestmentAccount).where(InvestmentAccount.user_id == current_user.id)
+    )
+    accounts = account_rows.scalars().all()
+
+    if not accounts:
+        return ReturnsResponse(rates={}, available=True, message=None)
+
+    # Weight each account's rate by its current total value when there are
+    # multiple. For one account this is just the account's own rates.
+    weighted_sums: dict[str, float] = {}
+    weight_totals: dict[str, float] = {}
+    any_success = False
+
+    for account in accounts:
+        try:
+            rate_payload = fetch_return_rates(account.snaptrade_account_id)
+            balance_payload = fetch_account_balance(account.snaptrade_account_id)
+        except Exception:
+            continue
+
+        any_success = True
+        cash = _extract_cash(balance_payload)
+        # Use cash as a weighting fallback so a single connected account always wins.
+        weight = max(cash, 1.0)
+
+        entries: list = []
+        if isinstance(rate_payload, list):
+            entries = rate_payload
+        elif isinstance(rate_payload, dict):
+            entries = (
+                rate_payload.get("return_rates")
+                or rate_payload.get("rates")
+                or rate_payload.get("results")
+                or []
+            )
+
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            tf = entry.get("timeframe") or entry.get("range") or entry.get("period")
+            rate = entry.get("rate_of_return") or entry.get("rate") or entry.get("return")
+            if tf is None or rate is None:
+                continue
+            try:
+                rate_val = float(rate)
+            except (TypeError, ValueError):
+                continue
+            key = str(tf).upper()
+            weighted_sums[key] = weighted_sums.get(key, 0.0) + rate_val * weight
+            weight_totals[key] = weight_totals.get(key, 0.0) + weight
+
+    if not any_success:
+        return ReturnsResponse(
+            rates={},
+            available=False,
+            message="Rate-of-return data is not enabled on your SnapTrade plan yet.",
+        )
+
+    rates = {
+        tf: round(weighted_sums[tf] / weight_totals[tf], 6)
+        for tf in weighted_sums
+        if weight_totals.get(tf)
+    }
+    return ReturnsResponse(rates=rates, available=True, message=None)

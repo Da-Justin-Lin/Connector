@@ -57,3 +57,30 @@ def fetch_account_balance(account_id: str) -> dict | list:
         account_id=account_id,
     )
     return response.body
+
+
+def fetch_balance_history(account_id: str) -> dict | list:
+    """Fetch daily account value over the past (up to 1y).
+
+    This endpoint is experimental in SnapTrade and disabled by default;
+    callers must tolerate 403/404 from SnapTrade. Returns empty list if so.
+    """
+    user_id, user_secret = _creds()
+    response = _client().account_information.get_account_balance_history(
+        user_id=user_id,
+        user_secret=user_secret,
+        account_id=account_id,
+    )
+    return response.body
+
+
+def fetch_return_rates(account_id: str, timeframes: str = "ALL,1Y,YTD,1M,1W,1D") -> dict:
+    """Fetch rate-of-return percentages over the given timeframes."""
+    user_id, user_secret = _creds()
+    response = _client().account_information.get_user_account_return_rates(
+        user_id=user_id,
+        user_secret=user_secret,
+        account_id=account_id,
+        timeframes=timeframes,
+    )
+    return response.body

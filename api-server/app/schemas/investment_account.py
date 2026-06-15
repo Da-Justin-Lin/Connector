@@ -51,3 +51,21 @@ class HoldingsResponse(BaseModel):
     total_value: float
     total_cash: float
     connected_accounts: int
+
+
+class HistoryPoint(BaseModel):
+    date: str
+    total_value: float
+
+
+class HistoryResponse(BaseModel):
+    series: list[HistoryPoint]
+    available: bool
+    message: str | None = None
+
+
+class ReturnsResponse(BaseModel):
+    # Map of timeframe code (e.g. "YTD", "1Y", "1M") -> rate as a fraction (0.12 = +12%)
+    rates: dict[str, float]
+    available: bool
+    message: str | None = None
