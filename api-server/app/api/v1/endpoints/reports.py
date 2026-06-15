@@ -22,8 +22,8 @@ from app.schemas.reports import (
 from app.services.market_data_service import CandleRange, fetch_candles
 from app.services.snaptrade_service import (
     fetch_account_balance,
+    fetch_account_orders,
     fetch_account_positions,
-    fetch_activities,
 )
 
 logger = logging.getLogger(__name__)
@@ -219,45 +219,57 @@ async def get_benchmark(
     )
 
 
-def _is_buy(action: str, description: str) -> bool:
-    a = (action or "").lower()
-    d = (description or "").lower()
-    if "buy" in a or "purchase" in a or "bought" in a:
-        return True
-    if "buy" in d or "bought" in d:
-        return True
-    return False
+def _extract_order_symbol(order: dict) -> tuple[str | None, str | None]:
+    """SnapTrade order payloads have `universal_symbol` (preferred) or `symbol`.
+    `universal_symbol.symbol` can itself be a dict on some versions."""
+    container = order.get("universal_symbol") or order.get("symbol") or {}
+    if isinstance(container, str):
+        return container, None
+    if not isinstance(container, dict):
+        return None, None
 
+    inner_symbol = container.get("symbol")
+    description = container.get("description") or container.get("name")
 
-def _is_sell(action: str, description: str) -> bool:
-    a = (action or "").lower()
-    d = (description or "").lower()
-    if "sell" in a or "sold" in a:
-        return True
-    if "sell" in d or "sold" in d:
-        return True
-    return False
-
-
-def _extract_symbol_and_description(act: dict) -> tuple[str | None, str | None]:
-    """SnapTrade activity payloads vary; the instrument can sit under
-    `symbol`, `instrument`, or appear as a top-level string."""
-    instrument = act.get("symbol") or act.get("instrument") or {}
-    if isinstance(instrument, dict):
-        symbol = (
-            instrument.get("symbol")
-            or instrument.get("raw_symbol")
-            or instrument.get("ticker")
+    if isinstance(inner_symbol, dict):
+        ticker = (
+            inner_symbol.get("symbol")
+            or inner_symbol.get("raw_symbol")
+            or inner_symbol.get("ticker")
         )
-        if isinstance(symbol, dict):
-            symbol = symbol.get("symbol") or symbol.get("raw_symbol")
-        description = instrument.get("description") or instrument.get("name")
-    else:
-        symbol = str(instrument) if instrument else None
-        description = None
-    if not description:
-        description = act.get("description")
-    return symbol, description
+        if not description:
+            description = inner_symbol.get("description")
+        return ticker, description
+
+    if isinstance(inner_symbol, str):
+        return inner_symbol, description
+
+    # Fallback: top-level raw_symbol / ticker fields on the container
+    ticker = container.get("raw_symbol") or container.get("ticker")
+    return ticker, description
+
+
+def _classify_order_action(order: dict) -> str | None:
+    raw = str(order.get("action") or order.get("side") or "").upper()
+    if "BUY" in raw:
+        return "BUY"
+    if "SELL" in raw:
+        return "SELL"
+    return None
+
+
+def _order_executed_date(order: dict) -> str | None:
+    for key in (
+        "time_executed",
+        "executed_at",
+        "filled_at",
+        "time_placed",
+        "created_at",
+    ):
+        value = order.get(key)
+        if value:
+            return str(value)[:10]
+    return None
 
 
 @router.get("/weekly-trades", response_model=WeeklyReportResponse)
@@ -294,97 +306,105 @@ async def get_weekly_trades(
     total_sells = 0.0
     fetch_failed = False
     debug_msg: str | None = None
-
     fetch_error_detail: str | None = None
+    raw_order_count = 0
+    skipped_states: dict[str, int] = {}
+
     if account_ids:
-        try:
-            activities = fetch_activities(
-                start_date=window_start.isoformat(),
-                end_date=today.isoformat(),
-                account_ids=account_ids,
-            )
-            logger.info("Fetched %d activities from SnapTrade", len(activities))
-        except Exception as exc:
-            logger.warning("Weekly trades fetch failed (with accounts param): %s", exc)
-            fetch_error_detail = f"{type(exc).__name__}: {exc}"
-            # Retry without the `accounts` filter — some SnapTrade SDK versions
-            # reject it or require a different shape.
+        any_account_succeeded = False
+        for acct_id in account_ids:
             try:
-                activities = fetch_activities(
-                    start_date=window_start.isoformat(),
-                    end_date=today.isoformat(),
-                    account_ids=None,
+                orders = fetch_account_orders(acct_id, state="EXECUTED")
+                any_account_succeeded = True
+            except Exception as exc:
+                logger.warning(
+                    "Orders fetch failed for account %s: %s", acct_id, exc
                 )
-                logger.info(
-                    "Retry without accounts succeeded: %d activities", len(activities)
+                fetch_error_detail = f"{type(exc).__name__}: {exc}"
+                # Try without the state filter — some SDKs reject it.
+                try:
+                    orders = fetch_account_orders(acct_id)
+                    any_account_succeeded = True
+                    fetch_error_detail = None
+                except Exception as exc2:
+                    logger.warning(
+                        "Orders retry without state failed for %s: %s", acct_id, exc2
+                    )
+                    fetch_error_detail = f"{type(exc2).__name__}: {exc2}"
+                    continue
+
+            raw_order_count += len(orders)
+            for order in orders:
+                if not isinstance(order, dict):
+                    continue
+
+                # Only count executed/filled trades
+                state = str(order.get("state") or order.get("status") or "").upper()
+                if state and state not in ("EXECUTED", "FILLED", "COMPLETED"):
+                    skipped_states[state] = skipped_states.get(state, 0) + 1
+                    continue
+
+                executed_date_str = _order_executed_date(order)
+                if not executed_date_str:
+                    continue
+                try:
+                    executed_date = date.fromisoformat(executed_date_str)
+                except ValueError:
+                    continue
+
+                if not (window_start <= executed_date <= window_end):
+                    continue
+
+                action = _classify_order_action(order)
+                if action is None:
+                    continue
+
+                symbol, description = _extract_order_symbol(order)
+
+                try:
+                    units = float(
+                        order.get("total_quantity")
+                        or order.get("filled_quantity")
+                        or order.get("units")
+                        or 0
+                    )
+                    price = float(
+                        order.get("execution_price")
+                        or order.get("filled_price")
+                        or order.get("price")
+                        or 0
+                    )
+                except (TypeError, ValueError):
+                    continue
+
+                amount = round(units * price, 2)
+                trades.append(
+                    TradeRow(
+                        trade_date=executed_date_str,
+                        symbol=symbol,
+                        description=description,
+                        action=action,
+                        units=units,
+                        price=price,
+                        amount=amount,
+                    )
                 )
-                fetch_error_detail = None
-            except Exception as exc2:
-                logger.warning("Weekly trades retry also failed: %s", exc2)
-                activities = []
-                fetch_failed = True
-                fetch_error_detail = f"{type(exc2).__name__}: {exc2}"
+                if action == "BUY":
+                    total_buys += amount
+                else:
+                    total_sells += amount
 
-        skipped_types: dict[str, int] = {}
-        for act in activities:
-            if not isinstance(act, dict):
-                continue
+        if not any_account_succeeded:
+            fetch_failed = True
 
-            action = str(
-                act.get("type")
-                or act.get("action")
-                or act.get("activity_type")
-                or ""
-            )
-            symbol, description = _extract_symbol_and_description(act)
-
-            is_buy = _is_buy(action, description or "")
-            is_sell = _is_sell(action, description or "")
-
-            if not (is_buy or is_sell):
-                skipped_types[action] = skipped_types.get(action, 0) + 1
-                continue
-
-            try:
-                units = float(act.get("units") or 0)
-                price = float(act.get("price") or 0)
-                amount = float(act.get("amount") or 0)
-            except (TypeError, ValueError):
-                continue
-
-            trade_date_raw = (
-                act.get("trade_date")
-                or act.get("settlement_date")
-                or act.get("date")
-                or ""
-            )
-            trade_date_str = str(trade_date_raw)[:10]
-
-            normalized_action = "BUY" if is_buy else "SELL"
-            trades.append(
-                TradeRow(
-                    trade_date=trade_date_str,
-                    symbol=symbol,
-                    description=description,
-                    action=normalized_action,
-                    units=units,
-                    price=price,
-                    amount=round(amount, 2),
-                )
-            )
-            notional = abs(amount) if amount else round(units * price, 2)
-            if is_buy:
-                total_buys += notional
-            else:
-                total_sells += notional
-
-        if not trades and activities:
-            top_types = sorted(
-                skipped_types.items(), key=lambda x: x[1], reverse=True
+        if not trades and raw_order_count > 0:
+            top_states = sorted(
+                skipped_states.items(), key=lambda x: x[1], reverse=True
             )[:3]
             debug_msg = (
-                f"Pulled {len(activities)} activities, none classified as trades. "
-                f"Top non-trade types: {', '.join(t for t, _ in top_types) or 'unknown'}."
+                f"Pulled {raw_order_count} orders, none matched window "
+                f"{window_start}–{window_end}. Skipped states: "
+                f"{', '.join(s or 'UNKNOWN' for s, _ in top_states) or 'none'}."
             )
 
     trades.sort(key=lambda t: t.trade_date, reverse=True)

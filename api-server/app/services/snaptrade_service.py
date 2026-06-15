@@ -86,6 +86,41 @@ def fetch_return_rates(account_id: str, timeframes: str = "ALL,1Y,YTD,1M,1W,1D")
     return response.body
 
 
+def fetch_account_orders(account_id: str, state: str | None = None, days: int | None = None) -> list:
+    """Fetch recent orders for a single brokerage account.
+
+    `state` filters to e.g. EXECUTED / FILLED / CANCELLED; omit to get all.
+    `days` is a lookback window the SDK supports for limiting results.
+    """
+    user_id, user_secret = _creds()
+    kwargs = {
+        "user_id": user_id,
+        "user_secret": user_secret,
+        "account_id": account_id,
+    }
+    if state:
+        kwargs["state"] = state
+    if days is not None:
+        kwargs["days"] = days
+
+    try:
+        response = _client().account_information.get_user_account_orders(**kwargs)
+    except TypeError:
+        # Some SDK builds dropped `state`/`days` — try minimal kwargs.
+        response = _client().account_information.get_user_account_orders(
+            user_id=user_id,
+            user_secret=user_secret,
+            account_id=account_id,
+        )
+
+    body = response.body
+    if isinstance(body, list):
+        return body
+    if isinstance(body, dict):
+        return body.get("results") or body.get("orders") or []
+    return []
+
+
 def fetch_activities(start_date: str, end_date: str, account_ids: list[str] | None = None) -> list:
     """Fetch trade/dividend/fee activities across the given date window.
 
