@@ -295,6 +295,7 @@ async def get_weekly_trades(
     fetch_failed = False
     debug_msg: str | None = None
 
+    fetch_error_detail: str | None = None
     if account_ids:
         try:
             activities = fetch_activities(
@@ -304,9 +305,25 @@ async def get_weekly_trades(
             )
             logger.info("Fetched %d activities from SnapTrade", len(activities))
         except Exception as exc:
-            logger.warning("Weekly trades fetch failed: %s", exc)
-            activities = []
-            fetch_failed = True
+            logger.warning("Weekly trades fetch failed (with accounts param): %s", exc)
+            fetch_error_detail = f"{type(exc).__name__}: {exc}"
+            # Retry without the `accounts` filter — some SnapTrade SDK versions
+            # reject it or require a different shape.
+            try:
+                activities = fetch_activities(
+                    start_date=window_start.isoformat(),
+                    end_date=today.isoformat(),
+                    account_ids=None,
+                )
+                logger.info(
+                    "Retry without accounts succeeded: %d activities", len(activities)
+                )
+                fetch_error_detail = None
+            except Exception as exc2:
+                logger.warning("Weekly trades retry also failed: %s", exc2)
+                activities = []
+                fetch_failed = True
+                fetch_error_detail = f"{type(exc2).__name__}: {exc2}"
 
         skipped_types: dict[str, int] = {}
         for act in activities:
@@ -417,7 +434,12 @@ async def get_weekly_trades(
 
     message = debug_msg
     if fetch_failed:
-        message = "Could not fetch trade history from SnapTrade."
+        # Surface the actual exception so we can diagnose from the browser.
+        message = (
+            f"Could not fetch trade history from SnapTrade: {fetch_error_detail}"
+            if fetch_error_detail
+            else "Could not fetch trade history from SnapTrade."
+        )
 
     return WeeklyReportResponse(
         week_start=window_start.isoformat(),

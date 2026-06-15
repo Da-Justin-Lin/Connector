@@ -91,20 +91,47 @@ def fetch_activities(start_date: str, end_date: str, account_ids: list[str] | No
 
     Dates are inclusive YYYY-MM-DD strings. SnapTrade returns a flat list of
     activity entries; callers can filter by type/symbol.
+
+    The SDK has shifted parameter names between versions (`accounts` vs
+    `account_id`/`account_ids`, and `start_date` vs `startDate`); we try a
+    few shapes and raise the first non-recoverable error.
     """
     user_id, user_secret = _creds()
-    kwargs = {
+    client = _client()
+
+    base = {
         "user_id": user_id,
         "user_secret": user_secret,
         "start_date": start_date,
         "end_date": end_date,
     }
+
+    # Try shapes in order: with comma-joined accounts, with list accounts,
+    # without accounts filter at all.
+    attempts: list[dict] = []
     if account_ids:
-        kwargs["accounts"] = ",".join(account_ids)
-    response = _client().transactions_and_reporting.get_activities(**kwargs)
-    body = response.body
-    if isinstance(body, list):
-        return body
-    if isinstance(body, dict):
-        return body.get("results") or body.get("activities") or []
+        attempts.append({**base, "accounts": ",".join(account_ids)})
+        attempts.append({**base, "accounts": list(account_ids)})
+    attempts.append(base)
+
+    last_exc: Exception | None = None
+    for kwargs in attempts:
+        try:
+            response = client.transactions_and_reporting.get_activities(**kwargs)
+            body = response.body
+            if isinstance(body, list):
+                return body
+            if isinstance(body, dict):
+                return body.get("results") or body.get("activities") or []
+            return []
+        except TypeError as exc:
+            # Almost certainly a wrong kwarg name — try the next shape.
+            last_exc = exc
+            continue
+        except Exception as exc:
+            # Real API error — bubble up.
+            raise exc
+
+    if last_exc:
+        raise last_exc
     return []
