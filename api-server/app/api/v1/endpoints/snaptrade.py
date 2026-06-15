@@ -107,22 +107,18 @@ async def get_holdings(
 
         positions = data.get("results") or data.get("positions") or []
         for pos in positions:
-            symbol = pos.get("symbol") or {}
-            inner = symbol.get("symbol") or {}
-            ticker = inner.get("symbol") or symbol.get("description")
-            name = inner.get("description") or symbol.get("description")
-            sec_type_obj = inner.get("type") or {}
-            security_type = (
-                sec_type_obj.get("description")
-                or sec_type_obj.get("code")
-                or ""
-            )
+            instrument = pos.get("instrument") or {}
+            ticker = instrument.get("symbol") or instrument.get("raw_symbol")
+            name = instrument.get("description")
+            security_type = instrument.get("kind") or ""
 
             quantity = float(pos.get("units") or 0)
             price = float(pos.get("price") or 0)
-            cost_raw = pos.get("average_purchase_price")
+            cost_per_share = pos.get("cost_basis") or pos.get("average_purchase_price")
             cost_basis = (
-                round(float(cost_raw) * quantity, 2) if cost_raw is not None else None
+                round(float(cost_per_share) * quantity, 2)
+                if cost_per_share is not None
+                else None
             )
 
             all_holdings.append(
