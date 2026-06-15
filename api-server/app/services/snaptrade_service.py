@@ -13,42 +13,35 @@ def _client() -> SnapTrade:
     )
 
 
-def register_user(internal_user_id: str) -> tuple[str, str]:
-    """Register a new user with SnapTrade. Returns (snaptrade_user_id, user_secret)."""
-    response = _client().authentication.register_snap_trade_user(
-        user_id=internal_user_id,
-    )
-    body = response.body
-    return body["userId"], body["userSecret"]
+def _creds() -> tuple[str, str]:
+    return settings.snaptrade_user_id, settings.snaptrade_user_secret
 
 
-def create_connection_portal_url(snaptrade_user_id: str, user_secret: str) -> str:
-    """Generate a one-time Connection Portal URL the user opens to link a brokerage."""
+def create_connection_portal_url() -> str:
+    """Generate a one-time Connection Portal URL to link a brokerage."""
+    user_id, user_secret = _creds()
     response = _client().authentication.login_snap_trade_user(
-        user_id=snaptrade_user_id,
+        user_id=user_id,
         user_secret=user_secret,
     )
-    body = response.body
-    return body["redirectURI"]
+    return response.body["redirectURI"]
 
 
-def list_accounts(snaptrade_user_id: str, user_secret: str) -> list[dict]:
-    """List every brokerage account connected by this user."""
+def list_accounts() -> list[dict]:
+    """List every brokerage account connected by the SnapTrade user."""
+    user_id, user_secret = _creds()
     response = _client().account_information.list_user_accounts(
-        user_id=snaptrade_user_id,
+        user_id=user_id,
         user_secret=user_secret,
     )
     return list(response.body or [])
 
 
-def fetch_account_positions(
-    snaptrade_user_id: str,
-    user_secret: str,
-    account_id: str,
-) -> dict:
+def fetch_account_positions(account_id: str) -> dict:
     """Fetch positions (holdings + cash) for a single brokerage account."""
+    user_id, user_secret = _creds()
     response = _client().account_information.get_all_account_positions(
-        user_id=snaptrade_user_id,
+        user_id=user_id,
         user_secret=user_secret,
         account_id=account_id,
     )
