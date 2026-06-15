@@ -34,7 +34,7 @@ async def get_candles(
             range=range_key,
             candles=[],
             available=False,
-            message="Market data is not configured. Set FINNHUB_API_KEY to enable candle charts.",
+            message="Market data is not available.",
         )
 
     try:
