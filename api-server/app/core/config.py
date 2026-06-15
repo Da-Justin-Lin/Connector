@@ -7,6 +7,9 @@ class Settings(BaseSettings):
     snaptrade_user_id: str = ""
     snaptrade_user_secret: str = ""
 
+    # Market data (Finnhub) — needed for per-symbol candle charts
+    finnhub_api_key: str = ""
+
     database_url: str = "postgresql+asyncpg://postgres:password@localhost:5432/connector"
 
     secret_key: str = "changeme"

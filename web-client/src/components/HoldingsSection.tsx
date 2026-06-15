@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import api from "@/services/api";
+import SymbolDetailModal from "@/components/SymbolDetailModal";
 
 interface Holding {
   ticker: string | null;
@@ -45,7 +46,13 @@ function StatCard({ label, value }: { label: string; value: string }) {
   );
 }
 
-function AccountCard({ section }: { section: AccountSection }) {
+function AccountCard({
+  section,
+  onSelectSymbol,
+}: {
+  section: AccountSection;
+  onSelectSymbol: (ticker: string, name: string | null) => void;
+}) {
   const title =
     section.institution_name || section.account_name || "Brokerage Account";
   const subtitle =
@@ -90,19 +97,36 @@ function AccountCard({ section }: { section: AccountSection }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {section.holdings.map((h, i) => (
-                <tr key={i} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 font-medium text-gray-900">{h.ticker ?? "—"}</td>
-                  <td className="px-4 py-3 text-gray-700">{h.name ?? "—"}</td>
-                  <td className="px-4 py-3 capitalize text-gray-500">{h.security_type || "—"}</td>
-                  <td className="px-4 py-3 text-gray-700">{h.quantity.toFixed(4)}</td>
-                  <td className="px-4 py-3 text-gray-700">${h.institution_price.toFixed(2)}</td>
-                  <td className="px-4 py-3 font-medium text-gray-900">${fmt(h.market_value)}</td>
-                  <td className="px-4 py-3 text-gray-700">
-                    {h.cost_basis != null ? `$${fmt(h.cost_basis)}` : "—"}
-                  </td>
-                </tr>
-              ))}
+              {section.holdings.map((h, i) => {
+                const clickable = !!h.ticker;
+                return (
+                  <tr
+                    key={i}
+                    className={`${
+                      clickable
+                        ? "cursor-pointer hover:bg-indigo-50"
+                        : "hover:bg-gray-50"
+                    }`}
+                    onClick={() => clickable && onSelectSymbol(h.ticker!, h.name)}
+                  >
+                    <td className="px-4 py-3 font-medium text-gray-900">
+                      {clickable ? (
+                        <span className="text-indigo-600 hover:underline">{h.ticker}</span>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-gray-700">{h.name ?? "—"}</td>
+                    <td className="px-4 py-3 capitalize text-gray-500">{h.security_type || "—"}</td>
+                    <td className="px-4 py-3 text-gray-700">{h.quantity.toFixed(4)}</td>
+                    <td className="px-4 py-3 text-gray-700">${h.institution_price.toFixed(2)}</td>
+                    <td className="px-4 py-3 font-medium text-gray-900">${fmt(h.market_value)}</td>
+                    <td className="px-4 py-3 text-gray-700">
+                      {h.cost_basis != null ? `$${fmt(h.cost_basis)}` : "—"}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -119,6 +143,7 @@ export default function HoldingsSection() {
   const [data, setData] = useState<HoldingsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<{ symbol: string; name: string | null } | null>(null);
 
   useEffect(() => {
     api
@@ -145,7 +170,11 @@ export default function HoldingsSection() {
       {!loading && !error && data && data.accounts.length > 0 && (
         <div className="mt-8 flex flex-col gap-6">
           {data.accounts.map((section) => (
-            <AccountCard key={section.snaptrade_account_id} section={section} />
+            <AccountCard
+              key={section.snaptrade_account_id}
+              section={section}
+              onSelectSymbol={(symbol, name) => setSelected({ symbol, name })}
+            />
           ))}
         </div>
       )}
@@ -154,6 +183,14 @@ export default function HoldingsSection() {
         <p className="mt-6 text-sm text-gray-500">
           Connect an account above to see your holdings.
         </p>
+      )}
+
+      {selected && (
+        <SymbolDetailModal
+          symbol={selected.symbol}
+          name={selected.name}
+          onClose={() => setSelected(null)}
+        />
       )}
     </>
   );
