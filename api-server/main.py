@@ -6,7 +6,7 @@ from app.core.config import settings
 
 app = FastAPI(
     title="Connector API",
-    description="Personal investment aggregator — unified Plaid data layer",
+    description="Personal investment aggregator — unified SnapTrade data layer",
     version="1.0.0",
 )
 

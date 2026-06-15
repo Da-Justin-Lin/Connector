@@ -42,7 +42,7 @@ export default function HoldingsSection() {
 
   useEffect(() => {
     api
-      .get<HoldingsData>("/api/v1/plaid/holdings")
+      .get<HoldingsData>("/api/v1/snaptrade/holdings")
       .then(({ data }) => setData(data))
       .catch(() => setError("Failed to load holdings."))
       .finally(() => setLoading(false));

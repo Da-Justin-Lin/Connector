@@ -1,6 +1,5 @@
 import uuid
 from datetime import datetime
-from decimal import Decimal
 
 from pydantic import BaseModel
 
@@ -8,27 +7,22 @@ from pydantic import BaseModel
 class InvestmentAccountRead(BaseModel):
     id: uuid.UUID
     user_id: uuid.UUID
-    plaid_item_id: str
+    snaptrade_account_id: str
     institution_name: str | None
     account_name: str | None
     account_type: str | None
-    current_balance: Decimal | None
+    account_number: str | None
     created_at: datetime
 
     model_config = {"from_attributes": True}
 
 
-class LinkTokenResponse(BaseModel):
-    link_token: str
+class ConnectionUrlResponse(BaseModel):
+    redirect_uri: str
 
 
-class ExchangeTokenRequest(BaseModel):
-    public_token: str
-
-
-class ExchangeTokenResponse(BaseModel):
-    item_id: str
-    message: str = "Account linked successfully"
+class SyncAccountsResponse(BaseModel):
+    accounts_synced: int
 
 
 class HoldingRead(BaseModel):

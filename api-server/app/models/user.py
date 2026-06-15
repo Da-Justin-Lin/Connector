@@ -10,6 +10,7 @@ from app.models.base import Base
 
 if TYPE_CHECKING:
     from app.models.investment_account import InvestmentAccount
+    from app.models.snaptrade_user import SnapTradeUser
 
 
 class User(Base):
@@ -30,4 +31,7 @@ class User(Base):
 
     accounts: Mapped[list["InvestmentAccount"]] = relationship(
         "InvestmentAccount", back_populates="user", cascade="all, delete-orphan"
+    )
+    snaptrade_user: Mapped["SnapTradeUser | None"] = relationship(
+        "SnapTradeUser", back_populates="user", uselist=False, cascade="all, delete-orphan"
     )

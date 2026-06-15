@@ -2,9 +2,8 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    plaid_client_id: str = ""
-    plaid_secret: str = ""
-    plaid_env: str = "sandbox"
+    snaptrade_client_id: str = ""
+    snaptrade_consumer_key: str = ""
 
     database_url: str = "postgresql+asyncpg://postgres:password@localhost:5432/connector"
 
