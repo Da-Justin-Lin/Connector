@@ -105,7 +105,7 @@ async def get_holdings(
         except Exception:
             continue
 
-        positions = data.get("positions") or []
+        positions = data.get("results") or data.get("positions") or []
         for pos in positions:
             symbol = pos.get("symbol") or {}
             inner = symbol.get("symbol") or {}
