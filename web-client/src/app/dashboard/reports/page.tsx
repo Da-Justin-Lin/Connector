@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import api from "@/services/api";
 
@@ -43,9 +43,24 @@ function fmtPct(rate: number | null | undefined) {
 
 function fmtDate(iso: string) {
   if (!iso) return "—";
-  const d = new Date(iso);
+  const d = new Date(iso + "T00:00:00");
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function fmtDateLong(iso: string) {
+  if (!iso) return "—";
+  const d = new Date(iso + "T00:00:00");
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function isoDate(d: Date) {
+  return d.toISOString().slice(0, 10);
 }
 
 function StatCard({
@@ -68,31 +83,76 @@ function StatCard({
 }
 
 export default function ReportsPage() {
+  const today = useMemo(() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }, []);
+
+  // weekOffset = 0 → current 7-day window ending today.
+  // weekOffset = -1 → previous week (ends 7 days ago), etc.
+  const [weekOffset, setWeekOffset] = useState(0);
+
+  const { startDate, endDate } = useMemo(() => {
+    const end = new Date(today);
+    end.setDate(end.getDate() + weekOffset * 7);
+    const start = new Date(end);
+    start.setDate(start.getDate() - 6); // inclusive 7-day window
+    return { startDate: isoDate(start), endDate: isoDate(end) };
+  }, [today, weekOffset]);
+
   const [data, setData] = useState<WeeklyReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
+    setError(null);
     api
-      .get<WeeklyReport>("/api/v1/reports/weekly-trades")
+      .get<WeeklyReport>(
+        `/api/v1/reports/weekly-trades?start_date=${startDate}&end_date=${endDate}`,
+      )
       .then(({ data }) => setData(data))
       .catch(() => setError("Failed to load report."))
       .finally(() => setLoading(false));
-  }, []);
+  }, [startDate, endDate]);
 
   const pnlTone =
     data?.week_pnl == null ? "default" : data.week_pnl >= 0 ? "up" : "down";
 
+  const canGoNext = weekOffset < 0;
+
   return (
     <div className="flex flex-col gap-8">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Weekly Report</h1>
-        {data && (
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Weekly Report</h1>
           <p className="text-sm text-gray-500">
-            {fmtDate(data.week_start)} – {fmtDate(data.week_end)}
+            {fmtDateLong(startDate)} – {fmtDateLong(endDate)}
           </p>
-        )}
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setWeekOffset((w) => w - 1)}
+            className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            ← Previous
+          </button>
+          <button
+            onClick={() => setWeekOffset(0)}
+            disabled={weekOffset === 0}
+            className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          >
+            This week
+          </button>
+          <button
+            onClick={() => setWeekOffset((w) => w + 1)}
+            disabled={!canGoNext}
+            className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          >
+            Next →
+          </button>
+        </div>
       </div>
 
       {error && <p className="text-sm text-rose-500">{error}</p>}
@@ -130,14 +190,14 @@ export default function ReportsPage() {
 
           <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
             <div className="border-b border-gray-200 bg-gray-50 px-6 py-4">
-              <p className="text-base font-semibold text-gray-900">Trades this week</p>
+              <p className="text-base font-semibold text-gray-900">Trades</p>
               {data.message && (
                 <p className="mt-1 text-xs text-gray-500">{data.message}</p>
               )}
             </div>
             {data.trades.length === 0 ? (
               <p className="px-6 py-8 text-center text-sm text-gray-500">
-                No trades in the past 7 days.
+                No trades in this window.
               </p>
             ) : (
               <div className="overflow-x-auto">

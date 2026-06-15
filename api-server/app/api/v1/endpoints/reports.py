@@ -263,12 +263,25 @@ def _extract_symbol_and_description(act: dict) -> tuple[str | None, str | None]:
 @router.get("/weekly-trades", response_model=WeeklyReportResponse)
 async def get_weekly_trades(
     days: int = 7,
+    start_date: str | None = None,
+    end_date: str | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    days = max(1, min(days, 90))  # safety bound
-    today = date.today()
-    window_start = today - timedelta(days=days)
+    # Explicit start/end dates take precedence over `days`.
+    if start_date and end_date:
+        try:
+            window_start = date.fromisoformat(start_date)
+            window_end = date.fromisoformat(end_date)
+        except ValueError:
+            window_end = date.today()
+            window_start = window_end - timedelta(days=7)
+    else:
+        days = max(1, min(days, 90))
+        window_end = date.today()
+        window_start = window_end - timedelta(days=days)
+
+    today = window_end
 
     account_rows = await db.execute(
         select(InvestmentAccount).where(InvestmentAccount.user_id == current_user.id)
