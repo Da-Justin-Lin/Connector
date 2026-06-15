@@ -18,7 +18,8 @@ export default function Navbar() {
     <nav className="border-b border-gray-200 bg-white">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="flex h-16 items-center justify-between">
-          <Link href="/dashboard" className="text-xl font-bold text-indigo-600">
+          <Link href="/dashboard" className="flex items-center gap-2 text-xl font-bold text-indigo-600">
+            <img src="/icon.svg" alt="" className="h-7 w-7" />
             Connector
           </Link>
 
