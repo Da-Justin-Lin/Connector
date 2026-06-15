@@ -84,3 +84,27 @@ def fetch_return_rates(account_id: str, timeframes: str = "ALL,1Y,YTD,1M,1W,1D")
         timeframes=timeframes,
     )
     return response.body
+
+
+def fetch_activities(start_date: str, end_date: str, account_ids: list[str] | None = None) -> list:
+    """Fetch trade/dividend/fee activities across the given date window.
+
+    Dates are inclusive YYYY-MM-DD strings. SnapTrade returns a flat list of
+    activity entries; callers can filter by type/symbol.
+    """
+    user_id, user_secret = _creds()
+    kwargs = {
+        "user_id": user_id,
+        "user_secret": user_secret,
+        "start_date": start_date,
+        "end_date": end_date,
+    }
+    if account_ids:
+        kwargs["accounts"] = ",".join(account_ids)
+    response = _client().transactions_and_reporting.get_activities(**kwargs)
+    body = response.body
+    if isinstance(body, list):
+        return body
+    if isinstance(body, dict):
+        return body.get("results") or body.get("activities") or []
+    return []
