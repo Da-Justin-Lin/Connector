@@ -16,6 +16,15 @@ type Range = "1D" | "1W" | "1M" | "3M" | "1Y";
 
 const RANGES: Range[] = ["1D", "1W", "1M", "3M", "1Y"];
 
+// How often to silently re-fetch in the background (ms)
+const POLL_INTERVAL: Record<Range, number> = {
+  "1D": 30_000,
+  "1W": 60_000,
+  "1M": 5 * 60_000,
+  "3M": 5 * 60_000,
+  "1Y": 5 * 60_000,
+};
+
 interface Candle {
   t: number;
   o: number;
@@ -43,6 +52,7 @@ export default function SymbolDetailModal({ symbol, name, onClose }: SymbolDetai
   const [range, setRange] = useState<Range>("1M");
   const [data, setData] = useState<CandlesResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   const chartHostRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -57,22 +67,28 @@ export default function SymbolDetailModal({ symbol, name, onClose }: SymbolDetai
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  // Fetch candles when symbol or range changes
+  // Initial fetch (shows loading spinner)
   useEffect(() => {
     setLoading(true);
+    setData(null);
     api
       .get<CandlesResponse>(`/api/v1/market/candles?symbol=${encodeURIComponent(symbol)}&range=${range}`)
-      .then(({ data }) => setData(data))
+      .then(({ data }) => { setData(data); setLastUpdated(new Date()); })
       .catch(() =>
-        setData({
-          symbol,
-          range,
-          candles: [],
-          available: false,
-          message: "Failed to load market data.",
-        }),
+        setData({ symbol, range, candles: [], available: false, message: "Failed to load market data." }),
       )
       .finally(() => setLoading(false));
+  }, [symbol, range]);
+
+  // Background polling — silently refreshes without touching loading state
+  useEffect(() => {
+    const id = setInterval(() => {
+      api
+        .get<CandlesResponse>(`/api/v1/market/candles?symbol=${encodeURIComponent(symbol)}&range=${range}`)
+        .then(({ data }) => { setData(data); setLastUpdated(new Date()); })
+        .catch(() => {});
+    }, POLL_INTERVAL[range]);
+    return () => clearInterval(id);
   }, [symbol, range]);
 
   // Create chart once
@@ -108,7 +124,7 @@ export default function SymbolDetailModal({ symbol, name, onClose }: SymbolDetai
     };
   }, []);
 
-  // Push data into series when it arrives
+  // Push data into series whenever it updates
   useEffect(() => {
     if (!seriesRef.current || !data) return;
     const points = data.candles.map((c) => ({
@@ -142,6 +158,11 @@ export default function SymbolDetailModal({ symbol, name, onClose }: SymbolDetai
             {latestClose !== null && (
               <p className="mt-1 text-base font-semibold text-gray-900">
                 ${latestClose.toFixed(2)}
+              </p>
+            )}
+            {lastUpdated && (
+              <p className="mt-0.5 text-xs text-gray-400">
+                Updated {lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
               </p>
             )}
           </div>
