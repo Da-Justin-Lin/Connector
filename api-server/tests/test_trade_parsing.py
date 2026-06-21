@@ -12,12 +12,15 @@ and options. The key behaviours under test:
 """
 
 from app.services.trade_parsing import (
+    build_holdings_map,
     classify_order_action,
     extract_option_contract,
     extract_order_symbol,
     format_option_contract,
+    normalize_instrument_key,
     order_executed_date,
     parse_order,
+    summarize_trades,
 )
 
 
@@ -160,3 +163,140 @@ def test_equity_symbol_extraction_handles_nested_symbol_dict():
     ticker, description = extract_order_symbol(order)
     assert ticker == "MSFT"
     assert description == "Microsoft"
+
+
+# --- instrument keys -------------------------------------------------------
+
+def test_normalize_key_strips_occ_padding_spaces():
+    # Same contract, different padding across endpoints -> same key.
+    assert normalize_instrument_key("AAPL  260116C00200000") == "AAPL260116C00200000"
+    assert normalize_instrument_key("AAPL260116C00200000") == "AAPL260116C00200000"
+
+
+def test_parse_order_sets_instrument_key():
+    assert parse_order(EQUITY_ORDER)["instrument_key"] == "AAPL"
+    assert parse_order(OPTION_ORDER)["instrument_key"] == "AAPL260116C00200000"
+
+
+# --- summarize_trades: realized round-trips --------------------------------
+
+def _trade(key, action, units, price, asset_type="EQUITY", day="2026-06-18"):
+    return {
+        "trade_date": day,
+        "symbol": key,
+        "description": None,
+        "action": action,
+        "units": units,
+        "price": price,
+        "asset_type": asset_type,
+        "instrument_key": key,
+    }
+
+
+def test_equity_round_trip_realized():
+    trades = [
+        _trade("AAPL", "BUY", 10, 100, day="2026-06-16"),
+        _trade("AAPL", "SELL", 10, 120, day="2026-06-18"),
+    ]
+    out = summarize_trades(trades)
+    assert out["realized_pnl"] == 200.0  # 10 * (120 - 100)
+    assert out["unrealized_pnl"] == 0.0
+    assert out["by_instrument"][0]["status"] == "closed"
+
+
+def test_option_round_trip_applies_multiplier():
+    trades = [
+        _trade("AAPL260116C00200000", "BUY", 2, 3.0, "OPTION", "2026-06-16"),
+        _trade("AAPL260116C00200000", "SELL", 2, 5.0, "OPTION", "2026-06-18"),
+    ]
+    out = summarize_trades(trades)
+    assert out["realized_pnl"] == 400.0  # 2 * (5 - 3) * 100
+
+
+def test_open_position_marked_to_current_price():
+    trades = [_trade("AAPL", "BUY", 10, 100, day="2026-06-16")]
+    out = summarize_trades(trades, {"AAPL": {"price": 110, "cost_per_share": 100}})
+    inst = out["by_instrument"][0]
+    assert out["realized_pnl"] == 0.0
+    assert out["unrealized_pnl"] == 100.0  # 10 * (110 - 100)
+    assert inst["status"] == "open"
+    assert inst["net_units"] == 10
+
+
+def test_partial_close_splits_realized_and_unrealized():
+    trades = [
+        _trade("AAPL", "BUY", 10, 100, day="2026-06-16"),
+        _trade("AAPL", "SELL", 4, 120, day="2026-06-18"),
+    ]
+    out = summarize_trades(trades, {"AAPL": {"price": 110, "cost_per_share": 100}})
+    inst = out["by_instrument"][0]
+    assert inst["realized_pnl"] == 80.0     # 4 * (120 - 100)
+    assert inst["unrealized_pnl"] == 60.0   # 6 * (110 - 100)
+    assert inst["status"] == "partial"
+    assert inst["net_units"] == 6
+
+
+def test_prewindow_sell_uses_snaptrade_cost_basis():
+    # Sold 5 with no in-window buy; basis comes from holdings.
+    trades = [_trade("AAPL", "SELL", 5, 120, day="2026-06-18")]
+    out = summarize_trades(trades, {"AAPL": {"price": 118, "cost_per_share": 90}})
+    inst = out["by_instrument"][0]
+    assert inst["realized_pnl"] == 150.0  # 5 * (120 - 90)
+    assert inst["needs_basis"] is False
+
+
+def test_prewindow_sell_without_basis_is_flagged():
+    trades = [_trade("AAPL", "SELL", 5, 120, day="2026-06-18")]
+    out = summarize_trades(trades, {})  # no holding -> no basis
+    inst = out["by_instrument"][0]
+    assert inst["realized_pnl"] == 0.0
+    assert inst["needs_basis"] is True
+
+
+def test_open_lot_without_price_is_flagged_not_marked():
+    trades = [_trade("AAPL", "BUY", 10, 100, day="2026-06-16")]
+    out = summarize_trades(trades, {})  # no current price
+    inst = out["by_instrument"][0]
+    assert inst["unrealized_pnl"] == 0.0
+    assert inst["needs_price"] is True
+
+
+def test_totals_aggregate_across_instruments():
+    trades = [
+        _trade("AAPL", "BUY", 10, 100, day="2026-06-16"),
+        _trade("AAPL", "SELL", 10, 120, day="2026-06-18"),   # +200 realized
+        _trade("MSFT", "BUY", 5, 200, day="2026-06-17"),     # open
+    ]
+    out = summarize_trades(trades, {"MSFT": {"price": 210, "cost_per_share": 200}})
+    assert out["realized_pnl"] == 200.0
+    assert out["unrealized_pnl"] == 50.0   # 5 * (210 - 200)
+    assert out["trading_pnl"] == 250.0
+
+
+# --- build_holdings_map ----------------------------------------------------
+
+def test_build_holdings_map_equity_and_option():
+    payload = {
+        "results": [
+            {
+                "instrument": {"symbol": "AAPL"},
+                "price": 110,
+                "average_purchase_price": 100,
+            }
+        ],
+        "option_positions": [
+            {
+                "symbol": {"option_symbol": {"ticker": "AAPL  260116C00200000"}},
+                "price": 4.10,
+                "average_purchase_price": 3.25,
+            }
+        ],
+    }
+    m = build_holdings_map(payload)
+    assert m["AAPL"] == {"price": 110.0, "cost_per_share": 100.0}
+    assert m["AAPL260116C00200000"] == {"price": 4.10, "cost_per_share": 3.25}
+
+
+def test_build_holdings_map_tolerates_junk():
+    assert build_holdings_map(None) == {}
+    assert build_holdings_map({"results": ["bad", {"price": 1}]}) == {}

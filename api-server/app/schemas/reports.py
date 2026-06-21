@@ -34,6 +34,21 @@ class TradeRow(BaseModel):
     price: float
     amount: float
     asset_type: str = "EQUITY"  # "EQUITY" or "OPTION"
+    instrument_key: str | None = None  # groups fills of the same instrument
+
+
+class InstrumentPnL(BaseModel):
+    symbol: str | None
+    description: str | None
+    asset_type: str
+    buy_units: float
+    sell_units: float
+    realized_pnl: float
+    unrealized_pnl: float
+    net_units: float          # quantity still open at window end
+    status: str               # "closed" | "open" | "partial"
+    needs_basis: bool = False  # pre-window sell with no SnapTrade cost basis
+    needs_price: bool = False  # open lot we couldn't mark (no current price)
 
 
 class WeeklyReportResponse(BaseModel):
@@ -48,5 +63,10 @@ class WeeklyReportResponse(BaseModel):
     week_deposits: float
     week_pnl: float | None
     week_pnl_pct: float | None
+    # Trade-matched P/L (realized round-trips + unrealized on open lots)
+    realized_pnl: float | None = None
+    unrealized_pnl: float | None = None
+    trading_pnl: float | None = None
+    pnl_by_instrument: list[InstrumentPnL] = []
     available: bool
     message: str | None = None

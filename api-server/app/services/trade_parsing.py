@@ -4,8 +4,34 @@ Kept free of FastAPI/DB/network imports so they can be unit-tested in
 isolation. The weekly-trades endpoint composes these.
 """
 
+from collections import defaultdict, deque
+
 # Each option contract controls this many shares; premiums are quoted per share.
 OPTION_CONTRACT_MULTIPLIER = 100
+
+# Quantities below this are treated as zero (float fill rounding).
+_QTY_EPS = 1e-9
+
+
+def _to_float(value) -> float | None:
+    try:
+        if value is None:
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def normalize_instrument_key(value) -> str | None:
+    """Collapse a ticker / OCC option symbol into a stable matching key.
+
+    SnapTrade renders OCC symbols with padding spaces (``"AAPL  260116C..."``)
+    that vary by endpoint, so we strip all whitespace and upper-case.
+    """
+    if not isinstance(value, str):
+        return None
+    key = "".join(value.split()).upper()
+    return key or None
 
 
 def extract_order_symbol(order: dict) -> tuple[str | None, str | None]:
@@ -148,9 +174,13 @@ def parse_order(order: dict) -> dict | None:
     if contract is not None:
         asset_type = "OPTION"
         symbol, description = format_option_contract(contract)
+        # Match option fills/holdings on the unique OCC contract symbol.
+        occ = contract.get("ticker") or contract.get("raw_symbol")
+        instrument_key = normalize_instrument_key(occ) or normalize_instrument_key(description)
     else:
         asset_type = "EQUITY"
         symbol, description = extract_order_symbol(order)
+        instrument_key = normalize_instrument_key(symbol)
 
     try:
         units = float(
@@ -180,4 +210,179 @@ def parse_order(order: dict) -> dict | None:
         "price": price,
         "amount": amount,
         "asset_type": asset_type,
+        "instrument_key": instrument_key,
+    }
+
+
+def build_holdings_map(positions_payload) -> dict[str, dict]:
+    """Map instrument_key -> {price, cost_per_share} from a positions payload.
+
+    Handles SnapTrade's equity `positions`/`results` array and, when present,
+    the `option_positions` array. Prices and cost basis are per share (option
+    premiums are per-share too); callers apply the contract multiplier.
+    """
+    out: dict[str, dict] = {}
+    if isinstance(positions_payload, dict):
+        equity = positions_payload.get("results") or positions_payload.get("positions") or []
+        options = positions_payload.get("option_positions") or []
+    elif isinstance(positions_payload, list):
+        equity, options = positions_payload, []
+    else:
+        return out
+
+    for pos in equity:
+        if not isinstance(pos, dict):
+            continue
+        instrument = pos.get("instrument") or {}
+        ticker = instrument.get("symbol") or instrument.get("raw_symbol") or pos.get("symbol")
+        if isinstance(ticker, dict):
+            ticker = ticker.get("symbol") or ticker.get("raw_symbol")
+        key = normalize_instrument_key(ticker)
+        if not key:
+            continue
+        out[key] = {
+            "price": _to_float(pos.get("price")),
+            "cost_per_share": _to_float(
+                pos.get("cost_basis") or pos.get("average_purchase_price")
+            ),
+        }
+
+    for pos in options:
+        if not isinstance(pos, dict):
+            continue
+        sym = pos.get("symbol")
+        option_symbol = sym.get("option_symbol") if isinstance(sym, dict) else None
+        option_symbol = option_symbol or pos.get("option_symbol") or {}
+        occ = None
+        if isinstance(option_symbol, dict):
+            occ = option_symbol.get("ticker") or option_symbol.get("raw_symbol")
+        key = normalize_instrument_key(occ)
+        if not key:
+            continue
+        out[key] = {
+            "price": _to_float(pos.get("price")),
+            "cost_per_share": _to_float(
+                pos.get("average_purchase_price") or pos.get("cost_basis")
+            ),
+        }
+
+    return out
+
+
+def summarize_trades(
+    trades: list[dict], holdings: dict[str, dict] | None = None
+) -> dict:
+    """FIFO-match window trades into realized + unrealized P/L.
+
+    * Round-trips fully inside the window -> realized P/L from matched lots.
+    * Open lots (bought in window, still held) -> unrealized vs current price.
+    * Sells with no in-window buy (closed a pre-window position) -> realized
+      against SnapTrade cost basis when available, else flagged `needs_basis`.
+
+    `holdings` maps instrument_key -> {price, cost_per_share} (per share).
+    Returns totals plus a per-instrument breakdown.
+    """
+    holdings = holdings or {}
+
+    groups: dict[str, list[dict]] = defaultdict(list)
+    for t in trades:
+        key = t.get("instrument_key")
+        if key:
+            groups[key].append(t)
+
+    by_instrument: list[dict] = []
+    total_realized = 0.0
+    total_unrealized = 0.0
+
+    for key, items in groups.items():
+        items_sorted = sorted(items, key=lambda x: x["trade_date"])
+        mult = (
+            OPTION_CONTRACT_MULTIPLIER
+            if items_sorted[0]["asset_type"] == "OPTION"
+            else 1
+        )
+        open_lots: deque[list[float]] = deque()  # [qty_remaining, price]
+        realized = 0.0
+        buy_units = sell_units = 0.0
+        unmatched_sell_units = unmatched_sell_proceeds = 0.0
+
+        for t in items_sorted:
+            q = _to_float(t.get("units")) or 0.0
+            p = _to_float(t.get("price")) or 0.0
+            if t["action"] == "BUY":
+                buy_units += q
+                open_lots.append([q, p])
+            else:
+                sell_units += q
+                remaining = q
+                while remaining > _QTY_EPS and open_lots:
+                    lot = open_lots[0]
+                    matched = min(remaining, lot[0])
+                    realized += (p - lot[1]) * matched * mult
+                    lot[0] -= matched
+                    remaining -= matched
+                    if lot[0] <= _QTY_EPS:
+                        open_lots.popleft()
+                if remaining > _QTY_EPS:
+                    unmatched_sell_units += remaining
+                    unmatched_sell_proceeds += remaining * p * mult
+
+        holding = holdings.get(key) or {}
+        current_price = holding.get("price")
+        cost_per_share = holding.get("cost_per_share")
+
+        # Pre-window sells: realize against SnapTrade cost basis if we have it.
+        needs_basis = False
+        if unmatched_sell_units > _QTY_EPS:
+            if cost_per_share is not None:
+                realized += (
+                    unmatched_sell_proceeds
+                    - cost_per_share * unmatched_sell_units * mult
+                )
+            else:
+                needs_basis = True
+
+        # Open lots still held: mark to current price.
+        net_units = sum(lot[0] for lot in open_lots)
+        unrealized = 0.0
+        needs_price = False
+        if net_units > _QTY_EPS:
+            if current_price is not None:
+                for lot in open_lots:
+                    unrealized += (current_price - lot[1]) * lot[0] * mult
+            else:
+                needs_price = True
+
+        if net_units > _QTY_EPS:
+            status = "open" if sell_units <= _QTY_EPS else "partial"
+        else:
+            status = "closed"
+
+        total_realized += realized
+        total_unrealized += unrealized
+        sample = items_sorted[0]
+        by_instrument.append(
+            {
+                "symbol": sample["symbol"],
+                "description": sample["description"],
+                "asset_type": sample["asset_type"],
+                "buy_units": round(buy_units, 4),
+                "sell_units": round(sell_units, 4),
+                "realized_pnl": round(realized, 2),
+                "unrealized_pnl": round(unrealized, 2),
+                "net_units": round(net_units, 4),
+                "status": status,
+                "needs_basis": needs_basis,
+                "needs_price": needs_price,
+            }
+        )
+
+    by_instrument.sort(
+        key=lambda x: x["realized_pnl"] + x["unrealized_pnl"], reverse=True
+    )
+    return {
+        "realized_pnl": round(total_realized, 2),
+        "unrealized_pnl": round(total_unrealized, 2),
+        "trading_pnl": round(total_realized + total_unrealized, 2),
+        "by_instrument": by_instrument,
     }

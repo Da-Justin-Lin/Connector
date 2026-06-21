@@ -15,6 +15,7 @@ from app.models.user import User
 from app.schemas.reports import (
     BenchmarkPoint,
     BenchmarkResponse,
+    InstrumentPnL,
     PortfolioReturns,
     TradeRow,
     WeeklyReportResponse,
@@ -25,7 +26,11 @@ from app.services.snaptrade_service import (
     fetch_account_orders,
     fetch_account_positions,
 )
-from app.services.trade_parsing import parse_order
+from app.services.trade_parsing import (
+    build_holdings_map,
+    parse_order,
+    summarize_trades,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -257,6 +262,7 @@ async def get_weekly_trades(
     fetch_error_detail: str | None = None
     raw_order_count = 0
     skipped_states: dict[str, int] = {}
+    window_trades: list[dict] = []  # parsed dicts feeding trade-matched P/L
 
     if account_ids:
         any_account_succeeded = False
@@ -303,6 +309,7 @@ async def get_weekly_trades(
                 if not (window_start <= executed_date <= window_end):
                     continue
 
+                window_trades.append(parsed)
                 row = TradeRow(**parsed)
                 trades.append(row)
                 if row.action == "BUY":
@@ -325,9 +332,30 @@ async def get_weekly_trades(
 
     trades.sort(key=lambda t: t.trade_date, reverse=True)
 
+    # Trade-matched P/L: FIFO-match round-trips, mark open lots to current price.
+    # Needs current holdings (price + cost basis) to value open lots and to
+    # cost pre-window sells.
+    holdings: dict[str, dict] = {}
+    for acct_id in account_ids:
+        try:
+            holdings.update(build_holdings_map(fetch_account_positions(acct_id)))
+        except Exception as exc:
+            logger.warning("Holdings fetch failed for %s: %s", acct_id, exc)
+
+    pnl = summarize_trades(window_trades, holdings)
+    pnl_by_instrument = [InstrumentPnL(**row) for row in pnl["by_instrument"]]
+    realized_pnl = pnl["realized_pnl"] if window_trades else None
+    unrealized_pnl = pnl["unrealized_pnl"] if window_trades else None
+    trading_pnl = pnl["trading_pnl"] if window_trades else None
+
     # Compute window P/L using snapshots + deposits in the same window
     window_start_dt = datetime.combine(
         window_start, datetime.min.time(), tzinfo=timezone.utc
+    )
+    # End of the selected window (inclusive of the whole end day) — important
+    # for past weeks, so we don't grab today's value as the window-end value.
+    window_end_dt = datetime.combine(
+        window_end, datetime.max.time(), tzinfo=timezone.utc
     )
     snap_start_row = await db.execute(
         select(PortfolioSnapshot)
@@ -340,7 +368,10 @@ async def get_weekly_trades(
     )
     snap_end_row = await db.execute(
         select(PortfolioSnapshot)
-        .where(PortfolioSnapshot.user_id == current_user.id)
+        .where(
+            PortfolioSnapshot.user_id == current_user.id,
+            PortfolioSnapshot.snapshot_at <= window_end_dt,
+        )
         .order_by(PortfolioSnapshot.snapshot_at.desc())
         .limit(1)
     )
@@ -389,6 +420,10 @@ async def get_weekly_trades(
         week_deposits=window_deposits,
         week_pnl=week_pnl,
         week_pnl_pct=week_pnl_pct,
+        realized_pnl=realized_pnl,
+        unrealized_pnl=unrealized_pnl,
+        trading_pnl=trading_pnl,
+        pnl_by_instrument=pnl_by_instrument,
         available=not fetch_failed,
         message=message,
     )

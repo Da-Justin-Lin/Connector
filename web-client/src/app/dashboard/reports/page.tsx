@@ -13,6 +13,21 @@ interface TradeRow {
   price: number;
   amount: number;
   asset_type?: string;
+  instrument_key?: string | null;
+}
+
+interface InstrumentPnL {
+  symbol: string | null;
+  description: string | null;
+  asset_type: string;
+  buy_units: number;
+  sell_units: number;
+  realized_pnl: number;
+  unrealized_pnl: number;
+  net_units: number;
+  status: string;
+  needs_basis: boolean;
+  needs_price: boolean;
 }
 
 interface WeeklyReport {
@@ -27,6 +42,10 @@ interface WeeklyReport {
   week_deposits: number;
   week_pnl: number | null;
   week_pnl_pct: number | null;
+  realized_pnl: number | null;
+  unrealized_pnl: number | null;
+  trading_pnl: number | null;
+  pnl_by_instrument: InstrumentPnL[];
   available: boolean;
   message: string | null;
 }
@@ -68,10 +87,12 @@ function StatCard({
   label,
   value,
   tone = "default",
+  hint,
 }: {
   label: string;
   value: string;
   tone?: "default" | "up" | "down";
+  hint?: string;
 }) {
   const valueColor =
     tone === "up" ? "text-emerald-600" : tone === "down" ? "text-rose-600" : "text-gray-900";
@@ -79,6 +100,7 @@ function StatCard({
     <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
       <p className="text-sm text-gray-500">{label}</p>
       <p className={`mt-1 text-2xl font-bold ${valueColor}`}>{value}</p>
+      {hint && <p className={`mt-0.5 text-xs ${valueColor}`}>{hint}</p>}
     </div>
   );
 }
@@ -120,6 +142,11 @@ export default function ReportsPage() {
 
   const pnlTone =
     data?.week_pnl == null ? "default" : data.week_pnl >= 0 ? "up" : "down";
+  const tradeTone =
+    data?.trading_pnl == null ? "default" : data.trading_pnl >= 0 ? "up" : "down";
+
+  const signed = (n: number | null | undefined) =>
+    n == null ? "—" : `${n >= 0 ? "+" : "−"}$${fmt(Math.abs(n))}`;
 
   const canGoNext = weekOffset < 0;
 
@@ -164,30 +191,149 @@ export default function ReportsPage() {
         <>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <StatCard
-              label="Week P/L"
+              label="Trading P/L (this week's trades)"
+              value={signed(data.trading_pnl)}
+              tone={tradeTone}
+            />
+            <StatCard
+              label="Realized"
+              value={signed(data.realized_pnl)}
+              tone={
+                data.realized_pnl == null
+                  ? "default"
+                  : data.realized_pnl >= 0
+                  ? "up"
+                  : "down"
+              }
+            />
+            <StatCard
+              label="Unrealized (open positions)"
+              value={signed(data.unrealized_pnl)}
+              tone={
+                data.unrealized_pnl == null
+                  ? "default"
+                  : data.unrealized_pnl >= 0
+                  ? "up"
+                  : "down"
+              }
+            />
+            <StatCard
+              label="Portfolio P/L (all holdings)"
               value={data.week_pnl == null ? "—" : `$${fmt(data.week_pnl)}`}
               tone={pnlTone}
+              hint={fmtPct(data.week_pnl_pct)}
             />
-            <StatCard
-              label="Week P/L %"
-              value={fmtPct(data.week_pnl_pct)}
-              tone={pnlTone}
-            />
-            <StatCard label="Total Buys" value={`$${fmt(data.total_buys)}`} />
-            <StatCard label="Total Sells" value={`$${fmt(data.total_sells)}`} />
           </div>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <StatCard
-              label="Start of week value"
-              value={data.week_start_value == null ? "—" : `$${fmt(data.week_start_value)}`}
-            />
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <StatCard label="Total Buys" value={`$${fmt(data.total_buys)}`} />
+            <StatCard label="Total Sells" value={`$${fmt(data.total_sells)}`} />
             <StatCard
               label="End of week value"
               value={data.week_end_value == null ? "—" : `$${fmt(data.week_end_value)}`}
             />
             <StatCard label="Deposits this week" value={`$${fmt(data.week_deposits)}`} />
           </div>
+
+          {data.pnl_by_instrument.length > 0 && (
+            <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+              <div className="border-b border-gray-200 bg-gray-50 px-6 py-4">
+                <p className="text-base font-semibold text-gray-900">
+                  P/L by position
+                </p>
+                <p className="mt-1 text-xs text-gray-500">
+                  Buys and sells matched per instrument (FIFO). Open lots are
+                  marked to the current price.
+                </p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200 text-sm">
+                  <thead className="bg-white">
+                    <tr>
+                      {["Symbol", "Status", "Realized", "Unrealized", "Total"].map(
+                        (h) => (
+                          <th
+                            key={h}
+                            className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500"
+                          >
+                            {h}
+                          </th>
+                        ),
+                      )}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {data.pnl_by_instrument.map((p, i) => {
+                      const total = p.realized_pnl + p.unrealized_pnl;
+                      return (
+                        <tr key={i} className="hover:bg-gray-50">
+                          <td className="px-4 py-3 font-medium text-gray-900">
+                            <div className="flex items-center gap-2">
+                              <span>{p.symbol ?? "—"}</span>
+                              {p.asset_type === "OPTION" && (
+                                <span className="rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-700">
+                                  Option
+                                </span>
+                              )}
+                            </div>
+                            {p.asset_type === "OPTION" && p.description && (
+                              <div className="text-xs font-normal text-gray-500">
+                                {p.description}
+                              </div>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 capitalize text-gray-600">
+                            {p.status}
+                            {p.needs_basis && (
+                              <span
+                                title="Closed a position opened before this week and SnapTrade had no cost basis — realized P/L excludes it."
+                                className="ml-1 text-amber-500"
+                              >
+                                ⚠
+                              </span>
+                            )}
+                            {p.needs_price && (
+                              <span
+                                title="No current price available to mark this open position."
+                                className="ml-1 text-amber-500"
+                              >
+                                ⚠
+                              </span>
+                            )}
+                          </td>
+                          <td
+                            className={`px-4 py-3 ${
+                              p.realized_pnl >= 0
+                                ? "text-emerald-600"
+                                : "text-rose-600"
+                            }`}
+                          >
+                            {signed(p.realized_pnl)}
+                          </td>
+                          <td
+                            className={`px-4 py-3 ${
+                              p.unrealized_pnl >= 0
+                                ? "text-emerald-600"
+                                : "text-rose-600"
+                            }`}
+                          >
+                            {signed(p.unrealized_pnl)}
+                          </td>
+                          <td
+                            className={`px-4 py-3 font-semibold ${
+                              total >= 0 ? "text-emerald-600" : "text-rose-600"
+                            }`}
+                          >
+                            {signed(total)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
             <div className="border-b border-gray-200 bg-gray-50 px-6 py-4">
