@@ -80,9 +80,6 @@ function Cell(props: CellProps) {
   // Size the ticker off the smaller dimension so it never overflows the cell.
   const fontSize = Math.max(9, Math.min(15, Math.round(Math.min(width / 4.5, height / 2.6))));
   const showPct = height > 38 && width > 40;
-  // Soft drop shadow keeps the white text readable on any cell color without a
-  // hard outline stroke.
-  const textShadow = "0 1px 2px rgba(0,0,0,0.55)";
 
   return (
     <g
@@ -106,10 +103,11 @@ function Cell(props: CellProps) {
             y={y + height / 2 + (showPct ? -2 : fontSize / 3)}
             textAnchor="middle"
             fill="#ffffff"
+            stroke="none"
             fontSize={fontSize}
             fontWeight={700}
             letterSpacing={0.3}
-            style={{ textShadow, pointerEvents: "none" }}
+            style={{ pointerEvents: "none" }}
           >
             {symbol}
           </text>
@@ -119,9 +117,10 @@ function Cell(props: CellProps) {
               y={y + height / 2 + fontSize}
               textAnchor="middle"
               fill="rgba(255,255,255,0.92)"
+              stroke="none"
               fontSize={Math.max(8, fontSize - 3)}
               fontWeight={500}
-              style={{ textShadow, pointerEvents: "none" }}
+              style={{ pointerEvents: "none" }}
             >
               {fmtPct(change_pct)}
             </text>
