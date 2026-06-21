@@ -1,0 +1,236 @@
+"use client";
+
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+import { ResponsiveContainer, Tooltip, Treemap } from "recharts";
+
+import api from "@/services/api";
+
+interface MarketMapItem {
+  symbol: string;
+  name: string;
+  market_cap: number;
+  last: number | null;
+  change_pct: number | null;
+}
+
+interface MarketMapGroup {
+  sector: string;
+  items: MarketMapItem[];
+}
+
+interface MarketMapResponse {
+  groups: MarketMapGroup[];
+  available: boolean;
+  message: string | null;
+}
+
+const POLL_MS = 120_000;
+
+// Diverging color: dark slate at 0%, toward green (up) / red (down), capped ±3%.
+function carpetColor(pct: number | null | undefined) {
+  if (pct == null) return "#374151";
+  const cap = 0.03;
+  const t = Math.max(-1, Math.min(1, pct / cap));
+  const neutral = [31, 41, 55]; // slate-800
+  const green = [22, 163, 74];
+  const red = [220, 38, 38];
+  const target = t >= 0 ? green : red;
+  const k = Math.abs(t);
+  const c = neutral.map((n, i) => Math.round(n + (target[i] - n) * k));
+  return `rgb(${c[0]},${c[1]},${c[2]})`;
+}
+
+function fmtCap(n: number) {
+  if (n >= 1e12) return `$${(n / 1e12).toFixed(2)}T`;
+  if (n >= 1e9) return `$${(n / 1e9).toFixed(1)}B`;
+  return `$${(n / 1e6).toFixed(0)}M`;
+}
+
+function fmtPct(pct: number | null | undefined) {
+  if (pct == null) return "—";
+  const v = pct * 100;
+  return `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
+}
+
+interface CellProps {
+  depth?: number;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  name?: string;
+  symbol?: string;
+  change_pct?: number | null;
+  onSelect?: (symbol: string) => void;
+}
+
+// Custom treemap cell: leaves (depth 2) are colored by day change; sector
+// rects (depth 1) just get a subtle border to delineate the groups.
+function Cell(props: CellProps) {
+  const { depth = 0, x = 0, y = 0, width = 0, height = 0, symbol, change_pct, onSelect } = props;
+
+  if (depth === 1) {
+    return <rect x={x} y={y} width={width} height={height} fill="none" stroke="#0b0f17" strokeWidth={2} />;
+  }
+  if (depth !== 2 || width <= 0 || height <= 0) return null;
+
+  const showLabel = width > 34 && height > 20;
+  const fontSize = Math.max(9, Math.min(14, Math.round(width / 5)));
+
+  return (
+    <g
+      style={{ cursor: symbol ? "pointer" : "default" }}
+      onClick={() => symbol && onSelect?.(symbol)}
+    >
+      <rect
+        x={x}
+        y={y}
+        width={width}
+        height={height}
+        fill={carpetColor(change_pct)}
+        stroke="#0b0f17"
+        strokeWidth={1}
+      />
+      {showLabel && (
+        <>
+          <text
+            x={x + width / 2}
+            y={y + height / 2 - 2}
+            textAnchor="middle"
+            fill="#ffffff"
+            fontSize={fontSize}
+            fontWeight={600}
+          >
+            {symbol}
+          </text>
+          {height > 34 && (
+            <text
+              x={x + width / 2}
+              y={y + height / 2 + fontSize - 2}
+              textAnchor="middle"
+              fill="rgba(255,255,255,0.85)"
+              fontSize={Math.max(8, fontSize - 3)}
+            >
+              {fmtPct(change_pct)}
+            </text>
+          )}
+        </>
+      )}
+    </g>
+  );
+}
+
+function CarpetTooltip({ active, payload }: { active?: boolean; payload?: Array<{ payload?: Record<string, unknown> }> }) {
+  if (!active || !payload || payload.length === 0) return null;
+  const node = payload[0]?.payload as
+    | { symbol?: string; fullName?: string; sector?: string; change_pct?: number | null; size?: number }
+    | undefined;
+  if (!node?.symbol) return null;
+  return (
+    <div className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-xs text-white shadow-lg">
+      <p className="font-semibold">
+        {node.symbol} <span className="font-normal text-gray-400">{node.fullName}</span>
+      </p>
+      <p className="text-gray-400">{node.sector}</p>
+      <p className="mt-1">
+        <span className={node.change_pct != null && node.change_pct >= 0 ? "text-emerald-400" : "text-rose-400"}>
+          {fmtPct(node.change_pct)}
+        </span>
+        <span className="ml-2 text-gray-400">{node.size != null ? fmtCap(node.size) : ""}</span>
+      </p>
+    </div>
+  );
+}
+
+export default function MarketMap() {
+  const router = useRouter();
+  const [groups, setGroups] = useState<MarketMapGroup[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = (initial: boolean) => {
+      api
+        .get<MarketMapResponse>("/api/v1/market/market-map")
+        .then(({ data }) => {
+          if (cancelled) return;
+          setGroups(data.groups);
+          setError(data.available ? null : data.message ?? "Market map unavailable.");
+        })
+        .catch(() => {
+          if (!cancelled && initial) setError("Failed to load the market map.");
+        })
+        .finally(() => {
+          if (!cancelled && initial) setLoading(false);
+        });
+    };
+    load(true);
+    const id = setInterval(() => load(false), POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
+  // recharts wants nested {name, children} with a numeric size key on leaves.
+  const data = useMemo(
+    () =>
+      groups.map((g) => ({
+        name: g.sector,
+        children: g.items.map((it) => ({
+          name: it.symbol,
+          symbol: it.symbol,
+          fullName: it.name,
+          sector: g.sector,
+          size: it.market_cap,
+          change_pct: it.change_pct,
+        })),
+      })),
+    [groups],
+  );
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div>
+          <p className="text-base font-semibold text-gray-900">Market map</p>
+          <p className="text-xs text-gray-500">
+            S&amp;P mega-caps by sector — cell size = market cap, color = today&apos;s move
+          </p>
+        </div>
+        <div className="flex items-center gap-2 text-[10px] text-gray-500">
+          <span>−3%</span>
+          <span className="h-2 w-32 rounded-full" style={{
+            background: "linear-gradient(to right, #dc2626, #1f2937, #16a34a)",
+          }} />
+          <span>+3%</span>
+        </div>
+      </div>
+
+      {loading ? (
+        <p className="mt-4 text-sm text-gray-400">Building market map…</p>
+      ) : error && groups.length === 0 ? (
+        <p className="mt-4 text-sm text-gray-500">{error}</p>
+      ) : (
+        <div className="mt-4 overflow-hidden rounded-lg bg-[#0b0f17] p-1">
+          <div className="h-[520px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <Treemap
+                data={data}
+                dataKey="size"
+                nameKey="name"
+                stroke="#0b0f17"
+                isAnimationActive={false}
+                content={<Cell onSelect={(s) => router.push(`/dashboard/positions/${encodeURIComponent(s)}`)} />}
+              >
+                <Tooltip content={<CarpetTooltip />} />
+              </Treemap>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

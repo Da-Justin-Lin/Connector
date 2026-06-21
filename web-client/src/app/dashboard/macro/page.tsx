@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import FearGreedGauge, { type FearGreed } from "@/components/FearGreedGauge";
+import MarketMap from "@/components/MarketMap";
 import MarketSnapshotCard, { type Snapshot } from "@/components/MarketSnapshotCard";
 import QuoteGrid from "@/components/QuoteGrid";
 import api from "@/services/api";
@@ -206,6 +207,9 @@ export default function MacroPage() {
           ))}
         </div>
       )}
+
+      {/* Market-cap treemap (MarketCarpet) */}
+      <MarketMap />
 
       {/* Treasury yields + the 10Y−3M spread */}
       <QuoteGrid

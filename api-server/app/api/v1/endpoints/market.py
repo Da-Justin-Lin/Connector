@@ -11,6 +11,9 @@ from app.schemas.market_data import (
     EarningsEvent,
     EarningsResponse,
     FearGreedResponse,
+    MarketMapGroup,
+    MarketMapItem,
+    MarketMapResponse,
     Quote,
     QuotesResponse,
     SectorsResponse,
@@ -23,6 +26,7 @@ from app.services.market_data_service import (
     fetch_crypto_fear_greed,
     fetch_earnings,
     fetch_fear_greed,
+    fetch_market_map,
     fetch_quotes,
     fetch_sectors,
     fetch_snapshots,
@@ -184,6 +188,30 @@ async def get_quotes(
         )
 
     return QuotesResponse(quotes=[Quote(**q) for q in raw], available=True)
+
+
+@router.get("/market-map", response_model=MarketMapResponse)
+async def get_market_map(_: User = Depends(get_current_user)):
+    """Sector-grouped market-cap treemap data (a MarketCarpet)."""
+    try:
+        groups = await fetch_market_map()
+    except Exception as exc:
+        logger.warning("Market map fetch failed: %s", exc)
+        return MarketMapResponse(
+            groups=[],
+            available=False,
+            message="Failed to build the market map right now. Try again in a minute.",
+        )
+    return MarketMapResponse(
+        groups=[
+            MarketMapGroup(
+                sector=g["sector"],
+                items=[MarketMapItem(**it) for it in g["items"]],
+            )
+            for g in groups
+        ],
+        available=True,
+    )
 
 
 @router.get("/crypto-fear-greed", response_model=CryptoFearGreedResponse)

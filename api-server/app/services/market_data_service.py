@@ -207,6 +207,60 @@ async def fetch_quotes(symbols: list[str]) -> list[dict]:
 
 
 # --------------------------------------------------------------------------- #
+# Market map (market-cap treemap / "MarketCarpet")
+# --------------------------------------------------------------------------- #
+
+_MAP_CACHE: dict[str, object] = {"data": None, "at": 0.0}
+_MAP_TTL = 120  # seconds — quotes move intraday
+
+
+async def fetch_market_map() -> list[dict]:
+    """Sector groups of {symbol, name, market_cap, change_pct} for the treemap.
+
+    Market cap is ``approx shares * live price`` so the whole map costs a single
+    batched quote download. Cached briefly to smooth out intraday refreshes.
+    """
+    from app.services.market_universe import SECTOR_ORDER, UNIVERSE
+
+    now = time.time()
+    cached = _MAP_CACHE.get("data")
+    if cached is not None and now - float(_MAP_CACHE["at"]) < _MAP_TTL:  # type: ignore[arg-type]
+        return cached  # type: ignore[return-value]
+
+    symbols = [row[0] for row in UNIVERSE]
+    quotes = {q["symbol"]: q for q in await fetch_quotes(symbols)}
+
+    groups: dict[str, list[dict]] = {sector: [] for sector in SECTOR_ORDER}
+    for ticker, name, sector, shares_millions in UNIVERSE:
+        quote = quotes.get(ticker.upper())
+        last = quote.get("last") if quote else None
+        if not last:
+            continue
+        market_cap = shares_millions * 1e6 * last
+        groups.setdefault(sector, []).append(
+            {
+                "symbol": ticker,
+                "name": name,
+                "market_cap": round(market_cap, 0),
+                "last": last,
+                "change_pct": quote.get("change_pct") if quote else None,
+            }
+        )
+
+    result = []
+    for sector in SECTOR_ORDER:
+        items = groups.get(sector) or []
+        if not items:
+            continue
+        items.sort(key=lambda it: it["market_cap"], reverse=True)
+        result.append({"sector": sector, "items": items})
+
+    _MAP_CACHE["data"] = result
+    _MAP_CACHE["at"] = now
+    return result
+
+
+# --------------------------------------------------------------------------- #
 # Sector enrichment for the allocation breakdown
 # --------------------------------------------------------------------------- #
 
