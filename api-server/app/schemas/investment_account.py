@@ -72,3 +72,28 @@ class ReturnsResponse(BaseModel):
     rates: dict[str, float]
     available: bool
     message: str | None = None
+
+
+class PositionTrade(BaseModel):
+    trade_date: str
+    action: str  # BUY / SELL
+    units: float
+    price: float
+    amount: float
+    asset_type: str
+    description: str | None = None
+
+
+class PositionDetailResponse(BaseModel):
+    symbol: str
+    name: str | None = None
+    held: bool
+    quantity: float
+    avg_cost: float | None = None
+    cost_basis: float | None = None
+    current_price: float | None = None
+    market_value: float | None = None
+    unrealized_pnl: float | None = None
+    unrealized_pnl_pct: float | None = None
+    accounts: int = 0
+    trades: list[PositionTrade] = []

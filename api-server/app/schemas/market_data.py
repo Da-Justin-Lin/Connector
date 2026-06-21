@@ -54,3 +54,8 @@ class EarningsResponse(BaseModel):
     events: list[EarningsEvent]
     available: bool = True
     message: str | None = None
+
+
+class SectorsResponse(BaseModel):
+    # Map of ticker -> sector label (null when yfinance has no classification)
+    sectors: dict[str, str | None]
