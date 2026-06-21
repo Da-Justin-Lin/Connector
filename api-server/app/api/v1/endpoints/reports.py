@@ -25,6 +25,7 @@ from app.services.snaptrade_service import (
     fetch_account_orders,
     fetch_account_positions,
 )
+from app.services.trade_parsing import parse_order
 
 logger = logging.getLogger(__name__)
 
@@ -219,59 +220,6 @@ async def get_benchmark(
     )
 
 
-def _extract_order_symbol(order: dict) -> tuple[str | None, str | None]:
-    """SnapTrade order payloads have `universal_symbol` (preferred) or `symbol`.
-    `universal_symbol.symbol` can itself be a dict on some versions."""
-    container = order.get("universal_symbol") or order.get("symbol") or {}
-    if isinstance(container, str):
-        return container, None
-    if not isinstance(container, dict):
-        return None, None
-
-    inner_symbol = container.get("symbol")
-    description = container.get("description") or container.get("name")
-
-    if isinstance(inner_symbol, dict):
-        ticker = (
-            inner_symbol.get("symbol")
-            or inner_symbol.get("raw_symbol")
-            or inner_symbol.get("ticker")
-        )
-        if not description:
-            description = inner_symbol.get("description")
-        return ticker, description
-
-    if isinstance(inner_symbol, str):
-        return inner_symbol, description
-
-    # Fallback: top-level raw_symbol / ticker fields on the container
-    ticker = container.get("raw_symbol") or container.get("ticker")
-    return ticker, description
-
-
-def _classify_order_action(order: dict) -> str | None:
-    raw = str(order.get("action") or order.get("side") or "").upper()
-    if "BUY" in raw:
-        return "BUY"
-    if "SELL" in raw:
-        return "SELL"
-    return None
-
-
-def _order_executed_date(order: dict) -> str | None:
-    for key in (
-        "time_executed",
-        "executed_at",
-        "filled_at",
-        "time_placed",
-        "created_at",
-    ):
-        value = order.get(key)
-        if value:
-            return str(value)[:10]
-    return None
-
-
 @router.get("/weekly-trades", response_model=WeeklyReportResponse)
 async def get_weekly_trades(
     days: int = 7,
@@ -344,55 +292,23 @@ async def get_weekly_trades(
                     skipped_states[state] = skipped_states.get(state, 0) + 1
                     continue
 
-                executed_date_str = _order_executed_date(order)
-                if not executed_date_str:
-                    continue
-                try:
-                    executed_date = date.fromisoformat(executed_date_str)
-                except ValueError:
+                parsed = parse_order(order)
+                if parsed is None:
                     continue
 
+                try:
+                    executed_date = date.fromisoformat(parsed["trade_date"])
+                except ValueError:
+                    continue
                 if not (window_start <= executed_date <= window_end):
                     continue
 
-                action = _classify_order_action(order)
-                if action is None:
-                    continue
-
-                symbol, description = _extract_order_symbol(order)
-
-                try:
-                    units = float(
-                        order.get("total_quantity")
-                        or order.get("filled_quantity")
-                        or order.get("units")
-                        or 0
-                    )
-                    price = float(
-                        order.get("execution_price")
-                        or order.get("filled_price")
-                        or order.get("price")
-                        or 0
-                    )
-                except (TypeError, ValueError):
-                    continue
-
-                amount = round(units * price, 2)
-                trades.append(
-                    TradeRow(
-                        trade_date=executed_date_str,
-                        symbol=symbol,
-                        description=description,
-                        action=action,
-                        units=units,
-                        price=price,
-                        amount=amount,
-                    )
-                )
-                if action == "BUY":
-                    total_buys += amount
+                row = TradeRow(**parsed)
+                trades.append(row)
+                if row.action == "BUY":
+                    total_buys += row.amount
                 else:
-                    total_sells += amount
+                    total_sells += row.amount
 
         if not any_account_succeeded:
             fetch_failed = True

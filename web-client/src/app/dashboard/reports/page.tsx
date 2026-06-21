@@ -12,6 +12,7 @@ interface TradeRow {
   units: number;
   price: number;
   amount: number;
+  asset_type?: string;
 }
 
 interface WeeklyReport {
@@ -219,7 +220,19 @@ export default function ReportsPage() {
                       <tr key={i} className="hover:bg-gray-50">
                         <td className="px-4 py-3 text-gray-700">{fmtDate(t.trade_date)}</td>
                         <td className="px-4 py-3 font-medium text-gray-900">
-                          {t.symbol ?? "—"}
+                          <div className="flex items-center gap-2">
+                            <span>{t.symbol ?? "—"}</span>
+                            {t.asset_type === "OPTION" ? (
+                              <span className="rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-700">
+                                Option
+                              </span>
+                            ) : null}
+                          </div>
+                          {t.asset_type === "OPTION" && t.description ? (
+                            <div className="text-xs font-normal text-gray-500">
+                              {t.description}
+                            </div>
+                          ) : null}
                         </td>
                         <td
                           className={`px-4 py-3 font-medium ${

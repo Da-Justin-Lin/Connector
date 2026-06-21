@@ -33,6 +33,7 @@ class TradeRow(BaseModel):
     units: float
     price: float
     amount: float
+    asset_type: str = "EQUITY"  # "EQUITY" or "OPTION"
 
 
 class WeeklyReportResponse(BaseModel):
