@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import AccountFilter from "@/components/AccountFilter";
 import AllocationBreakdown from "@/components/AllocationBreakdown";
+import BalanceToggle from "@/components/BalanceToggle";
 import ConnectAccountButton from "@/components/ConnectAccountButton";
 import HoldingsSection from "@/components/HoldingsSection";
 import PortfolioTrend from "@/components/PortfolioTrend";
@@ -20,6 +21,7 @@ export default function DashboardPage() {
         actions={
           <>
             <AccountFilter value={selectedAccountId} onChange={setSelectedAccountId} />
+            <BalanceToggle />
             <ConnectAccountButton />
           </>
         }
