@@ -84,6 +84,13 @@ function isoDate(d: Date) {
   return d.toISOString().slice(0, 10);
 }
 
+// In-memory stale-while-revalidate cache, keyed by account + week window.
+// Persists across navigation within the session so revisiting a week renders
+// instantly while a fresh copy is fetched in the background.
+const reportCache = new Map<string, WeeklyReport>();
+const cacheKey = (account: string | null, start: string, end: string) =>
+  `${account ?? "ALL"}|${start}|${end}`;
+
 function StatCard({
   label,
   value,
@@ -128,19 +135,47 @@ export default function ReportsPage() {
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [data, setData] = useState<WeeklyReport | null>(null);
   const [loading, setLoading] = useState(true);
+  const [revalidating, setRevalidating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setLoading(true);
+    const key = cacheKey(selectedAccountId, startDate, endDate);
+    const cached = reportCache.get(key);
+
+    // Show cached data immediately; only block with a spinner on a cold cache.
+    if (cached) {
+      setData(cached);
+      setLoading(false);
+    } else {
+      setData(null);
+      setLoading(true);
+    }
+    setRevalidating(true);
     setError(null);
+
+    let cancelled = false;
     const acct = selectedAccountId ? `&account_id=${selectedAccountId}` : "";
     api
       .get<WeeklyReport>(
         `/api/v1/reports/weekly-trades?start_date=${startDate}&end_date=${endDate}${acct}`,
       )
-      .then(({ data }) => setData(data))
-      .catch(() => setError("Failed to load report."))
-      .finally(() => setLoading(false));
+      .then(({ data }) => {
+        reportCache.set(key, data);
+        if (!cancelled) setData(data);
+      })
+      .catch(() => {
+        if (!cancelled && !cached) setError("Failed to load report.");
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+          setRevalidating(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [startDate, endDate, selectedAccountId]);
 
   const pnlTone =
@@ -157,7 +192,15 @@ export default function ReportsPage() {
     <div className="flex flex-col gap-8">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Weekly Report</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold text-gray-900">Weekly Report</h1>
+            {revalidating && data && (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700">
+                <span className="h-2 w-2 animate-pulse rounded-full bg-indigo-500" />
+                Updating…
+              </span>
+            )}
+          </div>
           <p className="text-sm text-gray-500">
             {fmtDateLong(startDate)} – {fmtDateLong(endDate)}
           </p>

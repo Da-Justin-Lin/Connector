@@ -1,3 +1,4 @@
+import asyncio
 from functools import lru_cache
 
 from snaptrade_client import SnapTrade
@@ -119,6 +120,22 @@ def fetch_account_orders(account_id: str, state: str | None = None, days: int | 
     if isinstance(body, dict):
         return body.get("results") or body.get("orders") or []
     return []
+
+
+async def fetch_account_orders_async(
+    account_id: str, state: str | None = None, days: int | None = None
+) -> list:
+    """Async wrapper: run the blocking orders call in a worker thread.
+
+    The SnapTrade SDK is synchronous; calling it directly in an async handler
+    blocks the event loop. Offloading lets callers `gather` across accounts.
+    """
+    return await asyncio.to_thread(fetch_account_orders, account_id, state, days)
+
+
+async def fetch_account_positions_async(account_id: str) -> dict:
+    """Async wrapper: run the blocking positions call in a worker thread."""
+    return await asyncio.to_thread(fetch_account_positions, account_id)
 
 
 def fetch_activities(start_date: str, end_date: str, account_ids: list[str] | None = None) -> list:

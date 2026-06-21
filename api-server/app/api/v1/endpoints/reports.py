@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import uuid
 from datetime import date, datetime, timedelta, timezone
@@ -23,8 +24,9 @@ from app.schemas.reports import (
 from app.services.market_data_service import CandleRange, fetch_candles
 from app.services.snaptrade_service import (
     fetch_account_balance,
-    fetch_account_orders,
+    fetch_account_orders_async,
     fetch_account_positions,
+    fetch_account_positions_async,
 )
 from app.services.trade_parsing import (
     build_holdings_map,
@@ -225,6 +227,28 @@ async def get_benchmark(
     )
 
 
+async def _orders_for_account(acct_id: str) -> tuple[str, list | None, str | None]:
+    """Fetch executed orders for one account, with a no-state-filter fallback.
+
+    Returns (account_id, orders | None, error_detail | None). Never raises so
+    callers can gather across accounts and tolerate partial failure.
+    """
+    try:
+        orders = await fetch_account_orders_async(acct_id, state="EXECUTED")
+        return acct_id, orders, None
+    except Exception as exc:
+        logger.warning("Orders fetch failed for account %s: %s", acct_id, exc)
+        # Some SDK builds reject the state filter — retry without it.
+        try:
+            orders = await fetch_account_orders_async(acct_id)
+            return acct_id, orders, None
+        except Exception as exc2:
+            logger.warning(
+                "Orders retry without state failed for %s: %s", acct_id, exc2
+            )
+            return acct_id, None, f"{type(exc2).__name__}: {exc2}"
+
+
 @router.get("/weekly-trades", response_model=WeeklyReportResponse)
 async def get_weekly_trades(
     days: int = 7,
@@ -272,27 +296,17 @@ async def get_weekly_trades(
     window_trades: list[dict] = []  # parsed dicts feeding trade-matched P/L
 
     if account_ids:
-        any_account_succeeded = False
-        for acct_id in account_ids:
-            try:
-                orders = fetch_account_orders(acct_id, state="EXECUTED")
-                any_account_succeeded = True
-            except Exception as exc:
-                logger.warning(
-                    "Orders fetch failed for account %s: %s", acct_id, exc
-                )
-                fetch_error_detail = f"{type(exc).__name__}: {exc}"
-                # Try without the state filter — some SDKs reject it.
-                try:
-                    orders = fetch_account_orders(acct_id)
-                    any_account_succeeded = True
-                    fetch_error_detail = None
-                except Exception as exc2:
-                    logger.warning(
-                        "Orders retry without state failed for %s: %s", acct_id, exc2
-                    )
-                    fetch_error_detail = f"{type(exc2).__name__}: {exc2}"
-                    continue
+        # Fetch every account's orders concurrently (offloaded to threads), so
+        # latency is the slowest single call rather than the sum.
+        order_results = await asyncio.gather(
+            *(_orders_for_account(a) for a in account_ids)
+        )
+        any_account_succeeded = any(orders is not None for _, orders, _ in order_results)
+
+        for acct_id, orders, err in order_results:
+            if orders is None:
+                fetch_error_detail = err
+                continue
 
             raw_order_count += len(orders)
             for order in orders:
@@ -343,11 +357,16 @@ async def get_weekly_trades(
     # Needs current holdings (price + cost basis) to value open lots and to
     # cost pre-window sells.
     holdings: dict[str, dict] = {}
-    for acct_id in account_ids:
-        try:
-            holdings.update(build_holdings_map(fetch_account_positions(acct_id)))
-        except Exception as exc:
-            logger.warning("Holdings fetch failed for %s: %s", acct_id, exc)
+    if account_ids:
+        position_results = await asyncio.gather(
+            *(fetch_account_positions_async(a) for a in account_ids),
+            return_exceptions=True,
+        )
+        for acct_id, result in zip(account_ids, position_results):
+            if isinstance(result, Exception):
+                logger.warning("Holdings fetch failed for %s: %s", acct_id, result)
+                continue
+            holdings.update(build_holdings_map(result))
 
     pnl = summarize_trades(window_trades, holdings)
     pnl_by_instrument = [InstrumentPnL(**row) for row in pnl["by_instrument"]]
