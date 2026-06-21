@@ -1,8 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useRouter } from "next/navigation";
 
-import SymbolDetailModal from "@/components/SymbolDetailModal";
 import { useCachedResource } from "@/hooks/useCachedResource";
 
 interface Holding {
@@ -53,7 +52,7 @@ function AccountCard({
   onSelectSymbol,
 }: {
   section: AccountSection;
-  onSelectSymbol: (ticker: string, name: string | null) => void;
+  onSelectSymbol: (ticker: string) => void;
 }) {
   const title =
     section.institution_name || section.account_name || "Brokerage Account";
@@ -109,7 +108,7 @@ function AccountCard({
                         ? "cursor-pointer hover:bg-indigo-50"
                         : "hover:bg-gray-50"
                     }`}
-                    onClick={() => clickable && onSelectSymbol(h.ticker!, h.name)}
+                    onClick={() => clickable && onSelectSymbol(h.ticker!)}
                   >
                     <td className="px-4 py-3 font-medium text-gray-900">
                       {clickable ? (
@@ -146,6 +145,7 @@ interface HoldingsSectionProps {
 }
 
 export default function HoldingsSection({ accountId = null }: HoldingsSectionProps) {
+  const router = useRouter();
   const qs = accountId ? `?account_id=${accountId}` : "";
   const { data, loading, revalidating, error } = useCachedResource<HoldingsData>(
     "holdings",
@@ -153,7 +153,6 @@ export default function HoldingsSection({ accountId = null }: HoldingsSectionPro
     `/api/v1/snaptrade/holdings${qs}`,
     { isStale: (d) => !!d.stale },
   );
-  const [selected, setSelected] = useState<{ symbol: string; name: string | null } | null>(null);
 
   const totalValue = data ? `$${fmt(data.total_value)}` : "—";
   const totalCash = data ? `$${fmt(data.total_cash)}` : "—";
@@ -183,7 +182,9 @@ export default function HoldingsSection({ accountId = null }: HoldingsSectionPro
             <AccountCard
               key={section.snaptrade_account_id}
               section={section}
-              onSelectSymbol={(symbol, name) => setSelected({ symbol, name })}
+              onSelectSymbol={(symbol) =>
+                router.push(`/dashboard/positions/${encodeURIComponent(symbol)}`)
+              }
             />
           ))}
         </div>
@@ -193,14 +194,6 @@ export default function HoldingsSection({ accountId = null }: HoldingsSectionPro
         <p className="mt-6 text-sm text-gray-500">
           Connect an account above to see your holdings.
         </p>
-      )}
-
-      {selected && (
-        <SymbolDetailModal
-          symbol={selected.symbol}
-          name={selected.name}
-          onClose={() => setSelected(null)}
-        />
       )}
     </>
   );

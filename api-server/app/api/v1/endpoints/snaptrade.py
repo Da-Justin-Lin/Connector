@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.core.database import get_db
+from app.models.broker_order import BrokerOrder
 from app.models.investment_account import InvestmentAccount
 from app.models.portfolio_snapshot import PortfolioSnapshot
 from app.models.user import User
@@ -17,6 +18,8 @@ from app.schemas.investment_account import (
     HistoryResponse,
     HoldingRead,
     HoldingsResponse,
+    PositionDetailResponse,
+    PositionTrade,
     ReturnsResponse,
     SyncAccountsResponse,
 )
@@ -28,6 +31,7 @@ from app.services.snaptrade_service import (
     fetch_return_rates,
     list_accounts,
 )
+from app.services.trade_parsing import normalize_instrument_key, parse_order
 
 router = APIRouter()
 
@@ -215,6 +219,114 @@ async def get_holdings(
         connected_accounts=len(accounts),
         stale=stale,
         last_synced_at=last_synced_at,
+    )
+
+
+@router.get("/positions/{symbol}", response_model=PositionDetailResponse)
+async def get_position_detail(
+    symbol: str,
+    background: BackgroundTasks,
+    account_id: str | None = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Aggregated position summary + this symbol's trade history.
+
+    Everything is read from the local caches (holdings + stored broker orders),
+    so this never blocks on a live SnapTrade call beyond the usual cold-sync.
+    """
+    target = normalize_instrument_key(symbol)
+
+    stmt = select(InvestmentAccount).where(InvestmentAccount.user_id == current_user.id)
+    if account_id:
+        stmt = stmt.where(InvestmentAccount.snaptrade_account_id == account_id)
+    accounts = (await db.execute(stmt)).scalars().all()
+
+    if not accounts or not target:
+        return PositionDetailResponse(symbol=symbol.upper(), held=False, quantity=0.0)
+
+    accounts, _sync_error, _stale = await ensure_holdings_cached(db, accounts, background)
+    account_uuids = [a.id for a in accounts]
+
+    # Aggregate the current position across accounts from cached holdings.
+    qty = 0.0
+    cost_basis = 0.0
+    has_cost = False
+    market_value = 0.0
+    current_price: float | None = None
+    name: str | None = None
+    holding_accounts = 0
+    for account in accounts:
+        held_here = False
+        for h in _holdings_from_cache(account.holdings_cache):
+            if normalize_instrument_key(h.ticker) != target:
+                continue
+            held_here = True
+            qty += h.quantity
+            market_value += h.market_value
+            if h.institution_price:
+                current_price = h.institution_price
+            name = name or h.name
+            if h.cost_basis is not None:
+                cost_basis += h.cost_basis
+                has_cost = True
+        if held_here:
+            holding_accounts += 1
+
+    # Trade history for this symbol from the stored broker orders.
+    trades: list[PositionTrade] = []
+    if account_uuids:
+        order_rows = await db.execute(
+            select(BrokerOrder)
+            .where(BrokerOrder.investment_account_id.in_(account_uuids))
+            .order_by(BrokerOrder.executed_at.desc())
+        )
+        for bo in order_rows.scalars().all():
+            order = bo.payload
+            if not isinstance(order, dict):
+                continue
+            state = str(order.get("state") or order.get("status") or "").upper()
+            if state and state not in ("EXECUTED", "FILLED", "COMPLETED"):
+                continue
+            parsed = parse_order(order)
+            if parsed is None or normalize_instrument_key(parsed["symbol"]) != target:
+                continue
+            trades.append(
+                PositionTrade(
+                    trade_date=parsed["trade_date"],
+                    action=parsed["action"],
+                    units=parsed["units"],
+                    price=parsed["price"],
+                    amount=parsed["amount"],
+                    asset_type=parsed["asset_type"],
+                    description=parsed["description"],
+                )
+            )
+            if len(trades) >= 200:
+                break
+
+    held = qty > 1e-9
+    avg_cost = round(cost_basis / qty, 4) if has_cost and qty > 1e-9 else None
+    unrealized = round(market_value - cost_basis, 2) if has_cost else None
+    unrealized_pct = (
+        round((market_value - cost_basis) / cost_basis, 6)
+        if has_cost and cost_basis > 0
+        else None
+    )
+
+    return PositionDetailResponse(
+        symbol=symbol.upper(),
+        name=name,
+        held=held,
+        quantity=round(qty, 4),
+        avg_cost=avg_cost,
+        cost_basis=round(cost_basis, 2) if has_cost else None,
+        current_price=current_price,
+        market_value=round(market_value, 2) if held else None,
+        unrealized_pnl=unrealized,
+        unrealized_pnl_pct=unrealized_pct,
+        accounts=holding_accounts,
+        trades=trades,
     )
 
 

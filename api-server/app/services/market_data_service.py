@@ -140,6 +140,62 @@ async def fetch_snapshots(symbols: list[str]) -> list[dict]:
 
 
 # --------------------------------------------------------------------------- #
+# Sector enrichment for the allocation breakdown
+# --------------------------------------------------------------------------- #
+
+# Per-symbol sector, cached for a day — sector classification rarely changes
+# and yfinance's .info call is heavy/rate-limited.
+_SECTOR_CACHE: dict[str, tuple[float, str | None]] = {}
+_SECTOR_TTL = 86400  # seconds
+
+# yfinance reports ETFs/crypto with a quoteType but no sector; map those to a
+# readable bucket so they still show up in the breakdown.
+_QUOTE_TYPE_LABELS = {
+    "ETF": "ETF",
+    "MUTUALFUND": "Fund",
+    "CRYPTOCURRENCY": "Crypto",
+    "CURRENCY": "Currency",
+}
+
+
+def _sector_sync(symbol: str) -> str | None:
+    try:
+        info = yf.Ticker(symbol).info
+    except Exception:
+        return None
+    if not isinstance(info, dict):
+        return None
+    sector = info.get("sector")
+    if sector:
+        return str(sector)
+    quote_type = str(info.get("quoteType") or "").upper()
+    return _QUOTE_TYPE_LABELS.get(quote_type)
+
+
+async def fetch_sectors(symbols: list[str]) -> dict[str, str | None]:
+    now = time.time()
+    out: dict[str, str | None] = {}
+    to_fetch: list[str] = []
+    for raw in symbols:
+        sym = raw.upper()
+        cached = _SECTOR_CACHE.get(sym)
+        if cached and now - cached[0] < _SECTOR_TTL:
+            out[sym] = cached[1]
+        else:
+            to_fetch.append(sym)
+
+    if to_fetch:
+        loop = asyncio.get_event_loop()
+        tasks = [loop.run_in_executor(None, partial(_sector_sync, s)) for s in to_fetch]
+        for sym, res in zip(to_fetch, await asyncio.gather(*tasks, return_exceptions=True)):
+            sector = None if isinstance(res, Exception) else res
+            _SECTOR_CACHE[sym] = (now, sector)
+            out[sym] = sector
+
+    return out
+
+
+# --------------------------------------------------------------------------- #
 # CNN Fear & Greed index (cached briefly to avoid hammering upstream)
 # --------------------------------------------------------------------------- #
 

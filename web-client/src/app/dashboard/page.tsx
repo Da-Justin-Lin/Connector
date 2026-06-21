@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import AccountFilter from "@/components/AccountFilter";
+import AllocationBreakdown from "@/components/AllocationBreakdown";
 import ConnectAccountButton from "@/components/ConnectAccountButton";
 import HoldingsSection from "@/components/HoldingsSection";
 import PortfolioTrend from "@/components/PortfolioTrend";
@@ -20,6 +21,7 @@ export default function DashboardPage() {
         </div>
       </div>
       <PortfolioTrend accountId={selectedAccountId} />
+      <AllocationBreakdown accountId={selectedAccountId} />
       <HoldingsSection accountId={selectedAccountId} />
     </div>
   );

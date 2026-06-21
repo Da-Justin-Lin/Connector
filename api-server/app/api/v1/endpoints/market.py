@@ -10,6 +10,7 @@ from app.schemas.market_data import (
     EarningsEvent,
     EarningsResponse,
     FearGreedResponse,
+    SectorsResponse,
     Snapshot,
     SnapshotsResponse,
 )
@@ -18,6 +19,7 @@ from app.services.market_data_service import (
     fetch_candles,
     fetch_earnings,
     fetch_fear_greed,
+    fetch_sectors,
     fetch_snapshots,
     is_configured,
 )
@@ -133,6 +135,34 @@ async def get_fear_greed(_: User = Depends(get_current_user)):
         prev_year=data.get("prev_year"),
         available=True,
     )
+
+
+@router.get("/sectors", response_model=SectorsResponse)
+async def get_sectors(
+    symbols: str = Query(..., max_length=600),
+    _: User = Depends(get_current_user),
+):
+    """Sector classification per ticker, for the allocation breakdown."""
+    requested = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    # De-dupe while preserving order; cap fan-out to keep upstream calls bounded.
+    seen: set[str] = set()
+    wanted: list[str] = []
+    for s in requested:
+        if s not in seen:
+            seen.add(s)
+            wanted.append(s)
+        if len(wanted) >= 60:
+            break
+
+    if not wanted:
+        return SectorsResponse(sectors={})
+
+    try:
+        sectors = await fetch_sectors(wanted)
+    except Exception as exc:
+        logger.warning("Sector fetch failed: %s", exc)
+        return SectorsResponse(sectors={})
+    return SectorsResponse(sectors=sectors)
 
 
 @router.get("/earnings", response_model=EarningsResponse)
