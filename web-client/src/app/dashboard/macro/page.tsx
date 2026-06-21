@@ -6,6 +6,7 @@ import FearGreedGauge, { type FearGreed } from "@/components/FearGreedGauge";
 import MarketMap from "@/components/MarketMap";
 import MarketSnapshotCard, { type Snapshot } from "@/components/MarketSnapshotCard";
 import QuoteGrid from "@/components/QuoteGrid";
+import PageHeader from "@/components/ui/PageHeader";
 import api from "@/services/api";
 
 // Symbols shown on the macro tab (must be on the backend allow-list).
@@ -182,24 +183,24 @@ export default function MacroPage() {
 
   return (
     <div className="flex flex-col gap-8">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Macro</h1>
-          <p className="text-sm text-gray-500">A quick read on how the market is moving today.</p>
-        </div>
-        {lastUpdated && (
-          <p className="text-xs text-gray-400">
-            Updated{" "}
-            {lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-          </p>
-        )}
-      </div>
+      <PageHeader
+        title="Macro"
+        subtitle="A quick read on how the market is moving today."
+        actions={
+          lastUpdated ? (
+            <p className="text-xs text-faint">
+              Updated{" "}
+              {lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+            </p>
+          ) : undefined
+        }
+      />
 
-      {snapError && <p className="text-sm text-rose-500">{snapError}</p>}
+      {snapError && <p className="text-sm text-down">{snapError}</p>}
 
       {/* Day charts */}
       {snapLoading ? (
-        <p className="text-sm text-gray-400">Loading market data…</p>
+        <p className="text-sm text-faint">Loading market data…</p>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {snapshots.map((s) => (
@@ -226,11 +227,11 @@ export default function MacroPage() {
           const inverted = spread < 0;
           return (
             <div className="flex items-center justify-between text-sm">
-              <span className="text-gray-600">10Y − 3M spread</span>
-              <span className={`font-semibold ${inverted ? "text-rose-600" : "text-emerald-600"}`}>
+              <span className="text-muted">10Y − 3M spread</span>
+              <span className={`font-semibold ${inverted ? "text-down" : "text-up"}`}>
                 {spread >= 0 ? "+" : "−"}
                 {Math.abs(spread).toFixed(2)} pts
-                {inverted && <span className="ml-2 font-normal text-rose-500">(inverted)</span>}
+                {inverted && <span className="ml-2 font-normal text-down">(inverted)</span>}
               </span>
             </div>
           );
@@ -261,39 +262,39 @@ export default function MacroPage() {
         {fg ? (
           <FearGreedGauge fg={fg} title="Fear & Greed" source="CNN · Stocks" />
         ) : (
-          <div className="rounded-xl border border-gray-200 bg-white p-5 text-sm text-gray-400 shadow-sm">
+          <div className="card p-5 text-sm text-faint">
             Loading sentiment…
           </div>
         )}
         {cryptoFg ? (
           <FearGreedGauge fg={cryptoFg} title="Crypto Fear & Greed" source="alternative.me" />
         ) : (
-          <div className="rounded-xl border border-gray-200 bg-white p-5 text-sm text-gray-400 shadow-sm">
+          <div className="card p-5 text-sm text-faint">
             Loading crypto sentiment…
           </div>
         )}
       </div>
 
       {/* Earnings */}
-      <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
-        <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-5 py-4">
+      <div className="card">
+        <div className="flex items-center justify-between border-b border-line bg-surface-2 px-5 py-4">
           <div>
-            <p className="text-base font-semibold text-gray-900">Earnings this week</p>
-            <p className="mt-0.5 text-xs text-gray-500">Upcoming reports from mega-cap names (next 14 days)</p>
+            <p className="text-base font-semibold text-content">Earnings this week</p>
+            <p className="mt-0.5 text-xs text-muted">Upcoming reports from mega-cap names (next 14 days)</p>
           </div>
         </div>
         {earnings == null ? (
-          <p className="px-5 py-8 text-center text-sm text-gray-400">Loading…</p>
+          <p className="px-5 py-8 text-center text-sm text-faint">Loading…</p>
         ) : earnings.length === 0 ? (
-          <p className="px-5 py-8 text-center text-sm text-gray-500">
+          <p className="px-5 py-8 text-center text-sm text-muted">
             {earningsMsg ?? "No upcoming earnings from the watchlist."}
           </p>
         ) : (
-          <ul className="divide-y divide-gray-100">
+          <ul className="divide-y divide-line">
             {earnings.map((e) => (
               <li key={e.symbol} className="flex items-center justify-between px-5 py-3">
-                <span className="text-sm font-medium text-gray-900">{e.symbol}</span>
-                <span className="text-sm text-gray-600">{fmtEarningsDate(e.date)}</span>
+                <span className="text-sm font-medium text-content">{e.symbol}</span>
+                <span className="text-sm text-muted">{fmtEarningsDate(e.date)}</span>
               </li>
             ))}
           </ul>

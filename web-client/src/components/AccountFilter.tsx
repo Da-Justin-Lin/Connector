@@ -52,14 +52,14 @@ export default function AccountFilter({ value, onChange }: AccountFilterProps) {
 
   return (
     <div className="flex items-center gap-2">
-      <label htmlFor="account-filter" className="text-sm font-medium text-gray-600">
+      <label htmlFor="account-filter" className="text-sm font-medium text-muted">
         Account
       </label>
       <select
         id="account-filter"
         value={value ?? "ALL"}
         onChange={(e) => onChange(e.target.value === "ALL" ? null : e.target.value)}
-        className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+        className="rounded-lg border border-line bg-surface px-3 py-1.5 text-sm shadow-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
       >
         <option value="ALL">All Accounts</option>
         {options.map((opt) => (

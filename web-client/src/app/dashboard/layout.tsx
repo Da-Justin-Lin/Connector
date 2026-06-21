@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import Navbar from "@/components/Navbar";
@@ -8,6 +8,7 @@ import { isLoggedIn } from "@/services/authService";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
@@ -21,9 +22,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   if (checking) return null;
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen">
       <Navbar />
-      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">{children}</main>
+      <main key={pathname} className="mx-auto max-w-7xl animate-fade-in px-4 py-8 sm:px-6 lg:px-8">
+        {children}
+      </main>
     </div>
   );
 }

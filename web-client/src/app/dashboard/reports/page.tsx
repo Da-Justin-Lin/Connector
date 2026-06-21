@@ -105,10 +105,10 @@ function StatCard({
   hint?: string;
 }) {
   const valueColor =
-    tone === "up" ? "text-emerald-600" : tone === "down" ? "text-rose-600" : "text-gray-900";
+    tone === "up" ? "text-up" : tone === "down" ? "text-down" : "text-content";
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-      <p className="text-sm text-gray-500">{label}</p>
+    <div className="card p-6">
+      <p className="text-sm text-muted">{label}</p>
       <p className={`mt-1 text-2xl font-bold ${valueColor}`}>{value}</p>
       {hint && <p className={`mt-0.5 text-xs ${valueColor}`}>{hint}</p>}
     </div>
@@ -213,15 +213,15 @@ export default function ReportsPage() {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-bold text-gray-900">Weekly Report</h1>
+            <h1 className="text-2xl font-bold text-content">Weekly Report</h1>
             {(revalidating || data?.stale) && data && (
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700">
-                <span className="h-2 w-2 animate-pulse rounded-full bg-indigo-500" />
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand">
+                <span className="h-2 w-2 animate-pulse rounded-full bg-brand" />
                 Updating…
               </span>
             )}
           </div>
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-muted">
             {fmtDateLong(startDate)} – {fmtDateLong(endDate)}
           </p>
         </div>
@@ -229,31 +229,31 @@ export default function ReportsPage() {
           <AccountFilter value={selectedAccountId} onChange={setSelectedAccountId} />
           <button
             onClick={() => setWeekOffset((w) => w - 1)}
-            className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            className="rounded-md border border-line bg-surface px-3 py-1.5 text-sm font-medium text-content hover:bg-surface-2"
           >
             ← Previous
           </button>
           <button
             onClick={() => setWeekOffset(0)}
             disabled={weekOffset === 0}
-            className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            className="rounded-md border border-line bg-surface px-3 py-1.5 text-sm font-medium text-content hover:bg-surface-2 disabled:opacity-50"
           >
             This week
           </button>
           <button
             onClick={() => setWeekOffset((w) => w + 1)}
             disabled={!canGoNext}
-            className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            className="rounded-md border border-line bg-surface px-3 py-1.5 text-sm font-medium text-content hover:bg-surface-2 disabled:opacity-50"
           >
             Next →
           </button>
         </div>
       </div>
 
-      {error && <p className="text-sm text-rose-500">{error}</p>}
+      {error && <p className="text-sm text-down">{error}</p>}
 
       {loading ? (
-        <p className="text-sm text-gray-400">Loading…</p>
+        <p className="text-sm text-faint">Loading…</p>
       ) : data ? (
         <>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -303,25 +303,25 @@ export default function ReportsPage() {
           </div>
 
           {data.pnl_by_instrument.length > 0 && (
-            <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
-              <div className="border-b border-gray-200 bg-gray-50 px-6 py-4">
-                <p className="text-base font-semibold text-gray-900">
+            <div className="overflow-hidden card">
+              <div className="border-b border-line bg-surface-2 px-6 py-4">
+                <p className="text-base font-semibold text-content">
                   P/L by position
                 </p>
-                <p className="mt-1 text-xs text-gray-500">
+                <p className="mt-1 text-xs text-muted">
                   Buys and sells matched per instrument (FIFO). Open lots are
                   marked to the current price.
                 </p>
               </div>
               <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200 text-sm">
-                  <thead className="bg-white">
+                <table className="min-w-full divide-y divide-line text-sm">
+                  <thead className="bg-surface">
                     <tr>
                       {["Symbol", "Status", "Realized", "Unrealized", "Total"].map(
                         (h) => (
                           <th
                             key={h}
-                            className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500"
+                            className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted"
                           >
                             {h}
                           </th>
@@ -329,27 +329,27 @@ export default function ReportsPage() {
                       )}
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-100">
+                  <tbody className="divide-y divide-line">
                     {data.pnl_by_instrument.map((p, i) => {
                       const total = p.realized_pnl + p.unrealized_pnl;
                       return (
-                        <tr key={i} className="hover:bg-gray-50">
-                          <td className="px-4 py-3 font-medium text-gray-900">
+                        <tr key={i} className="hover:bg-surface-2">
+                          <td className="px-4 py-3 font-medium text-content">
                             <div className="flex items-center gap-2">
                               <span>{p.symbol ?? "—"}</span>
                               {p.asset_type === "OPTION" && (
-                                <span className="rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-700">
+                                <span className="rounded bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand">
                                   Option
                                 </span>
                               )}
                             </div>
                             {p.asset_type === "OPTION" && p.description && (
-                              <div className="text-xs font-normal text-gray-500">
+                              <div className="text-xs font-normal text-muted">
                                 {p.description}
                               </div>
                             )}
                           </td>
-                          <td className="px-4 py-3 capitalize text-gray-600">
+                          <td className="px-4 py-3 capitalize text-muted">
                             {p.status}
                             {p.needs_basis && (
                               <span
@@ -371,8 +371,8 @@ export default function ReportsPage() {
                           <td
                             className={`px-4 py-3 ${
                               p.realized_pnl >= 0
-                                ? "text-emerald-600"
-                                : "text-rose-600"
+                                ? "text-up"
+                                : "text-down"
                             }`}
                           >
                             {signed(p.realized_pnl)}
@@ -380,15 +380,15 @@ export default function ReportsPage() {
                           <td
                             className={`px-4 py-3 ${
                               p.unrealized_pnl >= 0
-                                ? "text-emerald-600"
-                                : "text-rose-600"
+                                ? "text-up"
+                                : "text-down"
                             }`}
                           >
                             {signed(p.unrealized_pnl)}
                           </td>
                           <td
                             className={`px-4 py-3 font-semibold ${
-                              total >= 0 ? "text-emerald-600" : "text-rose-600"
+                              total >= 0 ? "text-up" : "text-down"
                             }`}
                           >
                             {signed(total)}
@@ -402,61 +402,61 @@ export default function ReportsPage() {
             </div>
           )}
 
-          <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
-            <div className="border-b border-gray-200 bg-gray-50 px-6 py-4">
-              <p className="text-base font-semibold text-gray-900">Trades</p>
+          <div className="overflow-hidden card">
+            <div className="border-b border-line bg-surface-2 px-6 py-4">
+              <p className="text-base font-semibold text-content">Trades</p>
               {data.message && (
-                <p className="mt-1 text-xs text-gray-500">{data.message}</p>
+                <p className="mt-1 text-xs text-muted">{data.message}</p>
               )}
             </div>
             {data.trades.length === 0 ? (
-              <p className="px-6 py-8 text-center text-sm text-gray-500">
+              <p className="px-6 py-8 text-center text-sm text-muted">
                 No trades in this window.
               </p>
             ) : (
               <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200 text-sm">
-                  <thead className="bg-white">
+                <table className="min-w-full divide-y divide-line text-sm">
+                  <thead className="bg-surface">
                     <tr>
                       {["Date", "Symbol", "Action", "Units", "Price", "Amount"].map((h) => (
                         <th
                           key={h}
-                          className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500"
+                          className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted"
                         >
                           {h}
                         </th>
                       ))}
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-100">
+                  <tbody className="divide-y divide-line">
                     {data.trades.map((t, i) => (
-                      <tr key={i} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 text-gray-700">{fmtDate(t.trade_date)}</td>
-                        <td className="px-4 py-3 font-medium text-gray-900">
+                      <tr key={i} className="hover:bg-surface-2">
+                        <td className="px-4 py-3 text-content">{fmtDate(t.trade_date)}</td>
+                        <td className="px-4 py-3 font-medium text-content">
                           <div className="flex items-center gap-2">
                             <span>{t.symbol ?? "—"}</span>
                             {t.asset_type === "OPTION" ? (
-                              <span className="rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-700">
+                              <span className="rounded bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand">
                                 Option
                               </span>
                             ) : null}
                           </div>
                           {t.asset_type === "OPTION" && t.description ? (
-                            <div className="text-xs font-normal text-gray-500">
+                            <div className="text-xs font-normal text-muted">
                               {t.description}
                             </div>
                           ) : null}
                         </td>
                         <td
                           className={`px-4 py-3 font-medium ${
-                            t.action === "BUY" ? "text-emerald-600" : "text-rose-600"
+                            t.action === "BUY" ? "text-up" : "text-down"
                           }`}
                         >
                           {t.action}
                         </td>
-                        <td className="px-4 py-3 text-gray-700">{t.units.toFixed(4)}</td>
-                        <td className="px-4 py-3 text-gray-700">${t.price.toFixed(2)}</td>
-                        <td className="px-4 py-3 font-medium text-gray-900">
+                        <td className="px-4 py-3 text-content">{t.units.toFixed(4)}</td>
+                        <td className="px-4 py-3 text-content">${t.price.toFixed(2)}</td>
+                        <td className="px-4 py-3 font-medium text-content">
                           ${fmt(Math.abs(t.amount))}
                         </td>
                       </tr>

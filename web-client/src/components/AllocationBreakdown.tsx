@@ -175,18 +175,18 @@ export default function AllocationBreakdown({ accountId = null }: { accountId?: 
   if (error) return null;
 
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+    <div className="card p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-base font-semibold text-gray-900">Allocation</p>
-        <div className="flex gap-1 rounded-lg bg-gray-100 p-1">
+        <p className="text-base font-semibold text-content">Allocation</p>
+        <div className="flex gap-1 rounded-lg bg-surface-2 p-1">
           {MODES.map((m) => (
             <button
               key={m.key}
               onClick={() => setMode(m.key)}
               className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
                 mode === m.key
-                  ? "bg-white text-gray-900 shadow-sm"
-                  : "text-gray-500 hover:text-gray-700"
+                  ? "bg-surface text-content shadow-sm"
+                  : "text-muted hover:text-content"
               }`}
             >
               {m.label}
@@ -196,9 +196,9 @@ export default function AllocationBreakdown({ accountId = null }: { accountId?: 
       </div>
 
       {loading ? (
-        <p className="mt-6 text-sm text-gray-400">Loading allocation…</p>
+        <p className="mt-6 text-sm text-faint">Loading allocation…</p>
       ) : slices.length === 0 ? (
-        <p className="mt-6 text-sm text-gray-500">No holdings to break down yet.</p>
+        <p className="mt-6 text-sm text-muted">No holdings to break down yet.</p>
       ) : (
         <div className="mt-4 flex flex-col gap-6 sm:flex-row sm:items-center">
           <div className="relative h-56 w-full sm:w-56">
@@ -226,23 +226,23 @@ export default function AllocationBreakdown({ accountId = null }: { accountId?: 
               </PieChart>
             </ResponsiveContainer>
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-              <span className="text-xs text-gray-500">Total</span>
-              <span className="text-lg font-bold text-gray-900">${fmt(total)}</span>
+              <span className="text-xs text-muted">Total</span>
+              <span className="text-lg font-bold text-content">${fmt(total)}</span>
             </div>
           </div>
 
           <div className="flex-1">
             {mode === "sector" && sectorLoading && (
-              <p className="mb-2 text-xs text-indigo-600">Classifying sectors…</p>
+              <p className="mb-2 text-xs text-brand">Classifying sectors…</p>
             )}
             <ul className="space-y-1.5">
               {slices.map((s, i) => (
                 <li key={i} className="flex items-center justify-between gap-3 text-sm">
                   <span className="flex items-center gap-2 truncate">
                     <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: s.color }} />
-                    <span className="truncate text-gray-700">{s.label}</span>
+                    <span className="truncate text-content">{s.label}</span>
                   </span>
-                  <span className="shrink-0 text-gray-500">
+                  <span className="shrink-0 text-muted">
                     {((s.value / total) * 100).toFixed(1)}%
                   </span>
                 </li>

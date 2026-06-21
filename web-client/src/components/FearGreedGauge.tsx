@@ -34,8 +34,8 @@ function Row({ label, value }: { label: string; value: number | null | undefined
   const dotColor = value == null ? "#d1d5db" : scoreColor(value);
   return (
     <div className="flex items-center justify-between text-xs">
-      <span className="text-gray-500">{label}</span>
-      <span className="flex items-center gap-1.5 font-medium text-gray-700">
+      <span className="text-muted">{label}</span>
+      <span className="flex items-center gap-1.5 font-medium text-content">
         <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: dotColor }} />
         {value == null ? "—" : Math.round(value)}
       </span>
@@ -83,14 +83,14 @@ export default function FearGreedGauge({ fg, title = "Fear & Greed", source = "C
   let prevMax = 0;
 
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+    <div className="card p-5">
       <div className="flex items-center justify-between">
-        <p className="text-sm font-semibold text-gray-900">{title}</p>
-        <span className="text-xs text-gray-400">{source}</span>
+        <p className="text-sm font-semibold text-content">{title}</p>
+        <span className="text-xs text-faint">{source}</span>
       </div>
 
       {!fg.available || score == null ? (
-        <p className="mt-6 text-center text-sm text-gray-400">
+        <p className="mt-6 text-center text-sm text-faint">
           {fg.message ?? "Unavailable right now."}
         </p>
       ) : (
@@ -172,7 +172,7 @@ export default function FearGreedGauge({ fg, title = "Fear & Greed", source = "C
           </div>
 
           {/* Range legend — current band highlighted */}
-          <div className="mt-4 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 border-t border-gray-100 pt-3">
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 border-t border-line/60 pt-3">
             {RANGES.map((r) => (
               <span
                 key={r.label}
@@ -189,7 +189,7 @@ export default function FearGreedGauge({ fg, title = "Fear & Greed", source = "C
           </div>
 
           {comparisons.length > 0 && (
-            <div className="mt-3 space-y-1 border-t border-gray-100 pt-3">
+            <div className="mt-3 space-y-1 border-t border-line/60 pt-3">
               {comparisons.map((c) => (
                 <Row key={c.label} label={c.label} value={c.value} />
               ))}

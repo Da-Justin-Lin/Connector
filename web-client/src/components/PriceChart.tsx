@@ -147,15 +147,15 @@ export default function PriceChart({ symbol, initialRange = "1M", onLatest }: Pr
   return (
     <div className="flex h-full flex-col">
       <div className="flex justify-end">
-        <div className="flex gap-1 rounded-lg bg-gray-100 p-1">
+        <div className="flex gap-1 rounded-lg bg-surface-2 p-1">
           {RANGES.map((r) => (
             <button
               key={r}
               onClick={() => setRange(r)}
               className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
                 range === r
-                  ? "bg-white text-gray-900 shadow-sm"
-                  : "text-gray-500 hover:text-gray-700"
+                  ? "bg-surface text-content shadow-sm"
+                  : "text-muted hover:text-content"
               }`}
             >
               {r}
@@ -166,17 +166,17 @@ export default function PriceChart({ symbol, initialRange = "1M", onLatest }: Pr
       <div className="relative mt-2 flex-1">
         <div ref={chartHostRef} className="absolute inset-0" />
         {loading && (
-          <div className="absolute inset-0 flex items-center justify-center bg-white/70 text-sm text-gray-400">
+          <div className="absolute inset-0 flex items-center justify-center bg-surface/70 text-sm text-faint">
             Loading…
           </div>
         )}
         {!loading && data && !data.available && (
-          <div className="absolute inset-0 flex items-center justify-center bg-white text-center text-sm text-gray-500">
+          <div className="absolute inset-0 flex items-center justify-center bg-surface text-center text-sm text-muted">
             {data.message ?? "Market data unavailable."}
           </div>
         )}
         {!loading && data && data.available && data.candles.length === 0 && (
-          <div className="absolute inset-0 flex items-center justify-center bg-white text-center text-sm text-gray-500">
+          <div className="absolute inset-0 flex items-center justify-center bg-surface text-center text-sm text-muted">
             {data.message ?? "No candle data in this range."}
           </div>
         )}
