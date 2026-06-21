@@ -3,11 +3,11 @@
 export interface FearGreed {
   score: number | null;
   rating: string | null;
-  updated_at: string | null;
+  updated_at?: string | null;
   prev_close: number | null;
-  prev_week: number | null;
-  prev_month: number | null;
-  prev_year: number | null;
+  prev_week?: number | null;
+  prev_month?: number | null;
+  prev_year?: number | null;
   available: boolean;
   message: string | null;
 }
@@ -21,7 +21,7 @@ function scoreColor(score: number) {
   return "#10b981"; // extreme greed
 }
 
-function Row({ label, value }: { label: string; value: number | null }) {
+function Row({ label, value }: { label: string; value: number | null | undefined }) {
   return (
     <div className="flex items-center justify-between text-xs">
       <span className="text-gray-500">{label}</span>
@@ -30,8 +30,22 @@ function Row({ label, value }: { label: string; value: number | null }) {
   );
 }
 
-export default function FearGreedGauge({ fg }: { fg: FearGreed }) {
+interface FearGreedGaugeProps {
+  fg: FearGreed;
+  title?: string;
+  source?: string;
+}
+
+export default function FearGreedGauge({ fg, title = "Fear & Greed", source = "CNN" }: FearGreedGaugeProps) {
   const score = fg.score;
+
+  // Only show comparison rows that have a value (crypto feed has just one).
+  const comparisons = [
+    { label: "Previous close", value: fg.prev_close },
+    { label: "1 week ago", value: fg.prev_week },
+    { label: "1 month ago", value: fg.prev_month },
+    { label: "1 year ago", value: fg.prev_year },
+  ].filter((c) => c.value != null);
 
   // Semicircle gauge geometry.
   const radius = 80;
@@ -45,8 +59,8 @@ export default function FearGreedGauge({ fg }: { fg: FearGreed }) {
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
       <div className="flex items-center justify-between">
-        <p className="text-sm font-semibold text-gray-900">Fear &amp; Greed</p>
-        <span className="text-xs text-gray-400">CNN</span>
+        <p className="text-sm font-semibold text-gray-900">{title}</p>
+        <span className="text-xs text-gray-400">{source}</span>
       </div>
 
       {!fg.available || score == null ? (
@@ -77,12 +91,13 @@ export default function FearGreedGauge({ fg }: { fg: FearGreed }) {
             </p>
           </div>
 
-          <div className="mt-4 space-y-1 border-t border-gray-100 pt-3">
-            <Row label="Previous close" value={fg.prev_close} />
-            <Row label="1 week ago" value={fg.prev_week} />
-            <Row label="1 month ago" value={fg.prev_month} />
-            <Row label="1 year ago" value={fg.prev_year} />
-          </div>
+          {comparisons.length > 0 && (
+            <div className="mt-4 space-y-1 border-t border-gray-100 pt-3">
+              {comparisons.map((c) => (
+                <Row key={c.label} label={c.label} value={c.value} />
+              ))}
+            </div>
+          )}
         </>
       )}
     </div>

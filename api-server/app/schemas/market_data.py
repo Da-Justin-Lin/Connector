@@ -59,3 +59,25 @@ class EarningsResponse(BaseModel):
 class SectorsResponse(BaseModel):
     # Map of ticker -> sector label (null when yfinance has no classification)
     sectors: dict[str, str | None]
+
+
+class Quote(BaseModel):
+    symbol: str
+    last: float | None = None
+    previous_close: float | None = None
+    change: float | None = None
+    change_pct: float | None = None
+
+
+class QuotesResponse(BaseModel):
+    quotes: list[Quote]
+    available: bool = True
+    message: str | None = None
+
+
+class CryptoFearGreedResponse(BaseModel):
+    score: float | None = None
+    rating: str | None = None
+    prev_close: float | None = None
+    available: bool = True
+    message: str | None = None
