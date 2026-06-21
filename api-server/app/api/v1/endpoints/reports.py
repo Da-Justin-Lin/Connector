@@ -25,12 +25,9 @@ from app.services.report_sync import (
     COLD_BACKFILL_DAYS,
     INCREMENTAL_DAYS,
     REFRESH_TTL,
+    ensure_holdings_cached,
     refresh_accounts_background,
     sync_accounts,
-)
-from app.services.snaptrade_service import (
-    fetch_account_balance,
-    fetch_account_positions,
 )
 from app.services.trade_parsing import (
     build_holdings_map,
@@ -60,45 +57,50 @@ def _extract_cash(payload) -> float:
     return total
 
 
-def _current_portfolio_value(account_ids: list[str]) -> float:
+def _current_portfolio_value_from_cache(accounts) -> float:
+    """Sum holdings market value + cash from each account's cached payloads."""
     total = 0.0
-    for acct_id in account_ids:
-        try:
-            pos_payload = fetch_account_positions(acct_id)
-            positions = pos_payload.get("results") or pos_payload.get("positions") or []
-            for pos in positions:
-                try:
-                    qty = float(pos.get("units") or 0)
-                    price = float(pos.get("price") or 0)
-                    total += qty * price
-                except (TypeError, ValueError):
-                    continue
-        except Exception as exc:
-            logger.warning("Returns: position fetch failed for %s: %s", acct_id, exc)
-        try:
-            bal_payload = fetch_account_balance(acct_id)
-            total += _extract_cash(bal_payload)
-        except Exception as exc:
-            logger.warning("Returns: balance fetch failed for %s: %s", acct_id, exc)
+    for account in accounts:
+        payload = account.holdings_cache
+        if isinstance(payload, dict):
+            positions = payload.get("results") or payload.get("positions") or []
+        elif isinstance(payload, list):
+            positions = payload
+        else:
+            positions = []
+        for pos in positions:
+            if not isinstance(pos, dict):
+                continue
+            try:
+                qty = float(pos.get("units") or 0)
+                price = float(pos.get("price") or 0)
+                total += qty * price
+            except (TypeError, ValueError):
+                continue
+        total += _extract_cash(account.balance_cache or [])
     return round(total, 2)
 
 
 @router.get("/portfolio-returns", response_model=PortfolioReturns)
 async def get_portfolio_returns(
+    background: BackgroundTasks,
     account_id: str | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    # 1. Live portfolio value (filtered if account_id is set)
+    # 1. Portfolio value from the cached holdings/balance (filtered if set).
     stmt = select(InvestmentAccount).where(InvestmentAccount.user_id == current_user.id)
     if account_id:
         stmt = stmt.where(InvestmentAccount.snaptrade_account_id == account_id)
     account_rows = await db.execute(stmt)
     accounts = account_rows.scalars().all()
-    account_uuids = [a.id for a in accounts]
-    snaptrade_ids = [a.snaptrade_account_id for a in accounts]
 
-    current_value = _current_portfolio_value(snaptrade_ids) if snaptrade_ids else 0.0
+    accounts, _sync_error, stale = await ensure_holdings_cached(
+        db, accounts, background
+    )
+    account_uuids = [a.id for a in accounts]
+
+    current_value = _current_portfolio_value_from_cache(accounts) if accounts else 0.0
 
     # 2. Total principal = sum of deposits to the matching accounts
     if account_uuids:
@@ -154,6 +156,9 @@ async def get_portfolio_returns(
             round(ytd_change / invested_basis, 6) if invested_basis else None
         )
 
+    synced_times = [a.holdings_synced_at for a in accounts if a.holdings_synced_at]
+    last_synced_at = min(synced_times).isoformat() if synced_times else None
+
     return PortfolioReturns(
         current_value=current_value,
         total_principal=total_principal,
@@ -163,6 +168,8 @@ async def get_portfolio_returns(
         day_change_pct=day_change_pct,
         ytd_change=ytd_change,
         ytd_change_pct=ytd_change_pct,
+        stale=stale,
+        last_synced_at=last_synced_at,
     )
 
 

@@ -10,6 +10,8 @@ class PortfolioReturns(BaseModel):
     day_change_pct: float | None
     ytd_change: float | None
     ytd_change_pct: float | None
+    stale: bool = False
+    last_synced_at: str | None = None
 
 
 class BenchmarkPoint(BaseModel):

@@ -1,6 +1,7 @@
+import asyncio
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,11 +20,11 @@ from app.schemas.investment_account import (
     ReturnsResponse,
     SyncAccountsResponse,
 )
+from app.services.report_sync import ensure_holdings_cached
 from app.services.snaptrade_service import (
     create_connection_portal_url,
     fetch_account_balance,
-    fetch_account_positions,
-    fetch_balance_history,
+    fetch_balance_history_async,
     fetch_return_rates,
     list_accounts,
 )
@@ -115,8 +116,54 @@ def _extract_cash(balance_payload: dict | list) -> float:
     return round(total, 2)
 
 
+def _holdings_from_cache(positions_payload) -> list[HoldingRead]:
+    """Parse a cached positions payload into HoldingRead rows."""
+    if isinstance(positions_payload, dict):
+        positions = (
+            positions_payload.get("results")
+            or positions_payload.get("positions")
+            or []
+        )
+    elif isinstance(positions_payload, list):
+        positions = positions_payload
+    else:
+        positions = []
+
+    holdings: list[HoldingRead] = []
+    for pos in positions:
+        if not isinstance(pos, dict):
+            continue
+        instrument = pos.get("instrument") or {}
+        ticker = instrument.get("symbol") or instrument.get("raw_symbol")
+        name = instrument.get("description")
+        security_type = instrument.get("kind") or ""
+
+        quantity = float(pos.get("units") or 0)
+        price = float(pos.get("price") or 0)
+        cost_per_share = pos.get("cost_basis") or pos.get("average_purchase_price")
+        cost_basis = (
+            round(float(cost_per_share) * quantity, 2)
+            if cost_per_share is not None
+            else None
+        )
+
+        holdings.append(
+            HoldingRead(
+                ticker=ticker,
+                name=name,
+                security_type=str(security_type or ""),
+                quantity=quantity,
+                institution_price=price,
+                market_value=round(quantity * price, 2),
+                cost_basis=cost_basis,
+            )
+        )
+    return holdings
+
+
 @router.get("/holdings", response_model=HoldingsResponse)
 async def get_holdings(
+    background: BackgroundTasks,
     account_id: str | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -132,50 +179,16 @@ async def get_holdings(
             accounts=[], total_value=0.0, total_cash=0.0, connected_accounts=0
         )
 
+    # Serve from the local cache; cold-sync misses inline, refresh stale ones
+    # in the background.
+    accounts, _sync_error, stale = await ensure_holdings_cached(
+        db, accounts, background
+    )
+
     sections: list[AccountSection] = []
-
     for account in accounts:
-        holdings: list[HoldingRead] = []
-
-        try:
-            positions_payload = fetch_account_positions(account.snaptrade_account_id)
-            positions = positions_payload.get("results") or positions_payload.get("positions") or []
-        except Exception:
-            positions = []
-
-        for pos in positions:
-            instrument = pos.get("instrument") or {}
-            ticker = instrument.get("symbol") or instrument.get("raw_symbol")
-            name = instrument.get("description")
-            security_type = instrument.get("kind") or ""
-
-            quantity = float(pos.get("units") or 0)
-            price = float(pos.get("price") or 0)
-            cost_per_share = pos.get("cost_basis") or pos.get("average_purchase_price")
-            cost_basis = (
-                round(float(cost_per_share) * quantity, 2)
-                if cost_per_share is not None
-                else None
-            )
-
-            holdings.append(
-                HoldingRead(
-                    ticker=ticker,
-                    name=name,
-                    security_type=str(security_type or ""),
-                    quantity=quantity,
-                    institution_price=price,
-                    market_value=round(quantity * price, 2),
-                    cost_basis=cost_basis,
-                )
-            )
-
-        try:
-            balance_payload = fetch_account_balance(account.snaptrade_account_id)
-            cash = _extract_cash(balance_payload)
-        except Exception:
-            cash = 0.0
-
+        holdings = _holdings_from_cache(account.holdings_cache)
+        cash = _extract_cash(account.balance_cache or [])
         holdings_value = round(sum(h.market_value for h in holdings), 2)
         sections.append(
             AccountSection(
@@ -192,12 +205,16 @@ async def get_holdings(
 
     total_value = round(sum(s.total_value for s in sections), 2)
     total_cash = round(sum(s.cash for s in sections), 2)
+    synced_times = [a.holdings_synced_at for a in accounts if a.holdings_synced_at]
+    last_synced_at = min(synced_times).isoformat() if synced_times else None
 
     return HoldingsResponse(
         accounts=sections,
         total_value=total_value,
         total_cash=total_cash,
         connected_accounts=len(accounts),
+        stale=stale,
+        last_synced_at=last_synced_at,
     )
 
 
@@ -286,11 +303,17 @@ async def get_history(
     any_success = False
     last_error: str | None = None
 
-    for account in accounts:
-        try:
-            payload = fetch_balance_history(account.snaptrade_account_id)
-        except Exception as exc:
-            last_error = str(exc)
+    # Fetch every account's balance history concurrently (offloaded to threads).
+    payloads = await asyncio.gather(
+        *(
+            fetch_balance_history_async(account.snaptrade_account_id)
+            for account in accounts
+        ),
+        return_exceptions=True,
+    )
+    for payload in payloads:
+        if isinstance(payload, Exception):
+            last_error = str(payload)
             continue
 
         any_success = True

@@ -51,6 +51,9 @@ class HoldingsResponse(BaseModel):
     total_value: float
     total_cash: float
     connected_accounts: int
+    # Served from the local cache; `stale` means a background refresh is running.
+    stale: bool = False
+    last_synced_at: str | None = None
 
 
 class HistoryPoint(BaseModel):

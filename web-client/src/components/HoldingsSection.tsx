@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
-import api from "@/services/api";
 import SymbolDetailModal from "@/components/SymbolDetailModal";
+import { useCachedResource } from "@/hooks/useCachedResource";
 
 interface Holding {
   ticker: string | null;
@@ -31,6 +31,8 @@ interface HoldingsData {
   total_value: number;
   total_cash: number;
   connected_accounts: number;
+  stale?: boolean;
+  last_synced_at?: string | null;
 }
 
 function fmt(n: number) {
@@ -144,27 +146,19 @@ interface HoldingsSectionProps {
 }
 
 export default function HoldingsSection({ accountId = null }: HoldingsSectionProps) {
-  const [data, setData] = useState<HoldingsData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const qs = accountId ? `?account_id=${accountId}` : "";
+  const { data, loading, revalidating, error } = useCachedResource<HoldingsData>(
+    "holdings",
+    accountId ?? "ALL",
+    `/api/v1/snaptrade/holdings${qs}`,
+    { isStale: (d) => !!d.stale },
+  );
   const [selected, setSelected] = useState<{ symbol: string; name: string | null } | null>(null);
-
-  useEffect(() => {
-    setLoading(true);
-    setError(null);
-    const params = new URLSearchParams();
-    if (accountId) params.set("account_id", accountId);
-    const qs = params.toString();
-    api
-      .get<HoldingsData>(`/api/v1/snaptrade/holdings${qs ? `?${qs}` : ""}`)
-      .then(({ data }) => setData(data))
-      .catch(() => setError("Failed to load holdings."))
-      .finally(() => setLoading(false));
-  }, [accountId]);
 
   const totalValue = data ? `$${fmt(data.total_value)}` : "—";
   const totalCash = data ? `$${fmt(data.total_cash)}` : "—";
   const connectedAccounts = data ? String(data.connected_accounts) : "—";
+  const updating = (revalidating || data?.stale) && data;
 
   return (
     <>
@@ -174,7 +168,14 @@ export default function HoldingsSection({ accountId = null }: HoldingsSectionPro
         <StatCard label="Connected Accounts" value={loading ? "…" : connectedAccounts} />
       </div>
 
-      {error && <p className="mt-6 text-sm text-red-500">{error}</p>}
+      {updating && (
+        <p className="mt-3 inline-flex items-center gap-1.5 text-xs text-indigo-600">
+          <span className="h-2 w-2 animate-pulse rounded-full bg-indigo-500" />
+          Updating holdings…
+        </p>
+      )}
+
+      {error && <p className="mt-6 text-sm text-red-500">Failed to load holdings.</p>}
 
       {!loading && !error && data && data.accounts.length > 0 && (
         <div className="mt-8 flex flex-col gap-6">

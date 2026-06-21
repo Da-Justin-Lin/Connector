@@ -19,6 +19,7 @@ from app.core.database import AsyncSessionLocal
 from app.models.broker_order import BrokerOrder
 from app.models.investment_account import InvestmentAccount
 from app.services.snaptrade_service import (
+    fetch_account_balance_async,
     fetch_account_orders_async,
     fetch_account_positions_async,
 )
@@ -57,15 +58,20 @@ async def _fetch_orders_with_fallback(snaptrade_account_id: str, days: int) -> l
 
 
 async def _fetch_account_data(
-    account: InvestmentAccount, days: int
-) -> tuple[InvestmentAccount, list | None, object | None]:
-    """Fetch orders + positions for one account (network only, no DB)."""
+    account: InvestmentAccount, days: int, include_orders: bool
+) -> tuple[InvestmentAccount, list | None, object | None, object | None]:
+    """Fetch orders (optional) + positions + balance for one account.
+
+    Network only, no DB. `include_orders=False` skips the orders call for
+    callers (the overview) that only need holdings + cash.
+    """
     snap_id = account.snaptrade_account_id
     orders: list | None = None
-    try:
-        orders = await _fetch_orders_with_fallback(snap_id, days)
-    except Exception as exc:
-        logger.warning("Order sync fetch failed for %s: %s", snap_id, exc)
+    if include_orders:
+        try:
+            orders = await _fetch_orders_with_fallback(snap_id, days)
+        except Exception as exc:
+            logger.warning("Order sync fetch failed for %s: %s", snap_id, exc)
 
     positions: object | None = None
     try:
@@ -73,7 +79,13 @@ async def _fetch_account_data(
     except Exception as exc:
         logger.warning("Holdings sync fetch failed for %s: %s", snap_id, exc)
 
-    return account, orders, positions
+    balance: object | None = None
+    try:
+        balance = await fetch_account_balance_async(snap_id)
+    except Exception as exc:
+        logger.warning("Balance sync fetch failed for %s: %s", snap_id, exc)
+
+    return account, orders, positions, balance
 
 
 async def _persist_account_data(
@@ -81,6 +93,7 @@ async def _persist_account_data(
     account: InvestmentAccount,
     orders: list | None,
     positions: object | None,
+    balance: object | None,
     now: datetime,
 ) -> None:
     """Upsert one account's fetched data. Run sequentially per session."""
@@ -124,12 +137,19 @@ async def _persist_account_data(
     if positions is not None:
         account.holdings_cache = positions
         account.holdings_synced_at = now
+    if balance is not None:
+        account.balance_cache = balance
+        account.holdings_synced_at = now
 
     session.add(account)
 
 
 async def sync_accounts(
-    session: AsyncSession, accounts: list[InvestmentAccount], *, days: int
+    session: AsyncSession,
+    accounts: list[InvestmentAccount],
+    *,
+    days: int,
+    include_orders: bool = True,
 ) -> None:
     """Fetch (concurrently) then persist (sequentially) for the given accounts.
 
@@ -138,15 +158,17 @@ async def sync_accounts(
     if not accounts:
         return
     fetched = await asyncio.gather(
-        *(_fetch_account_data(a, days) for a in accounts)
+        *(_fetch_account_data(a, days, include_orders) for a in accounts)
     )
     now = datetime.now(timezone.utc)
-    for account, orders, positions in fetched:
-        await _persist_account_data(session, account, orders, positions, now)
+    for account, orders, positions, balance in fetched:
+        await _persist_account_data(
+            session, account, orders, positions, balance, now
+        )
 
 
 async def refresh_accounts_background(
-    account_ids: list[uuid.UUID], days: int
+    account_ids: list[uuid.UUID], days: int, include_orders: bool = True
 ) -> None:
     """Background revalidation: sync the given accounts in a fresh session."""
     pending = [aid for aid in account_ids if aid not in _syncing]
@@ -162,11 +184,65 @@ async def refresh_accounts_background(
                     )
                 )
             ).scalars().all()
-            await sync_accounts(session, rows, days=days)
+            await sync_accounts(
+                session, rows, days=days, include_orders=include_orders
+            )
             await session.commit()
-        logger.info("Background order refresh synced %d accounts", len(pending))
+        logger.info("Background account refresh synced %d accounts", len(pending))
     except Exception as exc:
-        logger.exception("Background order refresh failed: %s", exc)
+        logger.exception("Background account refresh failed: %s", exc)
     finally:
         for aid in pending:
             _syncing.discard(aid)
+
+
+def holdings_is_stale(account: InvestmentAccount, now: datetime) -> bool:
+    """Whether an account's cached holdings/balance need a background refresh."""
+    if account.holdings_synced_at is None:
+        return True
+    return account.holdings_synced_at < now - REFRESH_TTL
+
+
+async def ensure_holdings_cached(session, accounts, background):
+    """Serve overview data from cache; cold-sync misses, refresh stale ones.
+
+    Returns (accounts, sync_error, stale): `accounts` is reloaded after a
+    failed cold sync (rollback expires the ORM instances), so callers should
+    use the returned list. `stale` is True when a background refresh fired.
+    """
+    if not accounts:
+        return accounts, None, False
+
+    now = datetime.now(timezone.utc)
+    sync_error: str | None = None
+    # Capture ids up front: a rollback expires the ORM instances, after which
+    # attribute access would trigger an illegal async lazy-load.
+    account_ids = [a.id for a in accounts]
+
+    cold = [a for a in accounts if a.holdings_synced_at is None]
+    if cold:
+        try:
+            await sync_accounts(
+                session, cold, days=INCREMENTAL_DAYS, include_orders=False
+            )
+            await session.commit()
+        except Exception as exc:
+            logger.warning("Cold holdings sync failed: %s", exc)
+            sync_error = f"{type(exc).__name__}: {exc}"
+            await session.rollback()
+            stmt = select(InvestmentAccount).where(
+                InvestmentAccount.id.in_(account_ids)
+            )
+            accounts = (await session.execute(stmt)).scalars().all()
+
+    stale_ids = [
+        a.id
+        for a in accounts
+        if a.holdings_synced_at is not None and holdings_is_stale(a, now)
+    ]
+    if stale_ids:
+        background.add_task(
+            refresh_accounts_background, stale_ids, INCREMENTAL_DAYS, False
+        )
+
+    return accounts, sync_error, bool(stale_ids)

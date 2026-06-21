@@ -41,6 +41,7 @@ class InvestmentAccount(Base):
         DateTime(timezone=True), nullable=True
     )
     holdings_cache: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    balance_cache: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     holdings_synced_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

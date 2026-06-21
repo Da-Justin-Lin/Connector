@@ -138,6 +138,16 @@ async def fetch_account_positions_async(account_id: str) -> dict:
     return await asyncio.to_thread(fetch_account_positions, account_id)
 
 
+async def fetch_account_balance_async(account_id: str) -> dict | list:
+    """Async wrapper: run the blocking balance call in a worker thread."""
+    return await asyncio.to_thread(fetch_account_balance, account_id)
+
+
+async def fetch_balance_history_async(account_id: str) -> dict | list:
+    """Async wrapper: run the blocking balance-history call in a worker thread."""
+    return await asyncio.to_thread(fetch_balance_history, account_id)
+
+
 def fetch_activities(start_date: str, end_date: str, account_ids: list[str] | None = None) -> list:
     """Fetch trade/dividend/fee activities across the given date window.
 

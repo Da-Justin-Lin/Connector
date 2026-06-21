@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   CartesianGrid,
   Legend,
@@ -12,7 +12,7 @@ import {
   YAxis,
 } from "recharts";
 
-import api from "@/services/api";
+import { useCachedResource } from "@/hooks/useCachedResource";
 
 type Range = "1D" | "1M" | "3M" | "6M" | "YTD" | "1Y";
 
@@ -90,6 +90,8 @@ interface PortfolioReturns {
   day_change_pct: number | null;
   ytd_change: number | null;
   ytd_change_pct: number | null;
+  stale?: boolean;
+  last_synced_at?: string | null;
 }
 
 interface Deposit {
@@ -220,53 +222,41 @@ interface PortfolioTrendProps {
 
 export default function PortfolioTrend({ accountId = null }: PortfolioTrendProps) {
   const [range, setRange] = useState<Range>("1Y");
-  const [history, setHistory] = useState<HistoryResponse | null>(null);
-  const [benchmark, setBenchmark] = useState<BenchmarkResponse | null>(null);
-  const [returns, setReturns] = useState<PortfolioReturns | null>(null);
-  const [deposits, setDeposits] = useState<Deposit[]>([]);
-  const [historyLoading, setHistoryLoading] = useState(true);
+  const rangeQuery = RANGES.find((r) => r.label === range)?.query || "1y";
+  const acct = accountId ?? "ALL";
+  const acctQs = accountId ? `&account_id=${accountId}` : "";
+  const acctQsOnly = accountId ? `?account_id=${accountId}` : "";
 
-  useEffect(() => {
-    setHistoryLoading(true);
-    const rangeQuery = RANGES.find((r) => r.label === range)?.query || "1y";
-    const params = new URLSearchParams({ range: rangeQuery });
-    if (accountId) params.set("account_id", accountId);
-    api
-      .get<HistoryResponse>(`/api/v1/snaptrade/history?${params.toString()}`)
-      .then(({ data }) => setHistory(data))
-      .catch(() =>
-        setHistory({ series: [], available: false, message: "Failed to load history." }),
-      )
-      .finally(() => setHistoryLoading(false));
+  const historyRes = useCachedResource<HistoryResponse>(
+    "history",
+    `${acct}|${rangeQuery}`,
+    `/api/v1/snaptrade/history?range=${rangeQuery}${acctQs}`,
+  );
+  const benchmarkRes = useCachedResource<BenchmarkResponse>(
+    "benchmark",
+    rangeQuery,
+    `/api/v1/reports/benchmark?range=${rangeQuery}&symbol=SPY`,
+  );
+  const returnsRes = useCachedResource<PortfolioReturns>(
+    "returns",
+    acct,
+    `/api/v1/reports/portfolio-returns${acctQsOnly}`,
+    { isStale: (d) => !!d.stale },
+  );
+  const depositsRes = useCachedResource<DepositsResponse>(
+    "deposits",
+    acct,
+    `/api/v1/deposits${acctQsOnly}`,
+  );
 
-    api
-      .get<BenchmarkResponse>(`/api/v1/reports/benchmark?range=${rangeQuery}&symbol=SPY`)
-      .then(({ data }) => setBenchmark(data))
-      .catch(() =>
-        setBenchmark({
-          symbol: "SPY",
-          range: rangeQuery,
-          series: [],
-          available: false,
-          message: null,
-        }),
-      );
-  }, [range, accountId]);
-
-  useEffect(() => {
-    const params = new URLSearchParams();
-    if (accountId) params.set("account_id", accountId);
-    const qs = params.toString();
-    api
-      .get<PortfolioReturns>(`/api/v1/reports/portfolio-returns${qs ? `?${qs}` : ""}`)
-      .then(({ data }) => setReturns(data))
-      .catch(() => setReturns(null));
-
-    api
-      .get<DepositsResponse>(`/api/v1/deposits${qs ? `?${qs}` : ""}`)
-      .then(({ data }) => setDeposits(data.deposits))
-      .catch(() => setDeposits([]));
-  }, [accountId]);
+  const history = historyRes.data;
+  const benchmark = benchmarkRes.data;
+  const returns = returnsRes.data;
+  const deposits = useMemo(() => depositsRes.data?.deposits ?? [], [depositsRes.data]);
+  const historyLoading = historyRes.loading;
+  const updating =
+    (returnsRes.revalidating || returns?.stale || historyRes.revalidating) &&
+    (history != null || returns != null);
 
   const chartData = useMemo<ChartPoint[]>(() => {
     const portfolio = history?.series ?? [];
@@ -384,8 +374,16 @@ export default function PortfolioTrend({ accountId = null }: PortfolioTrendProps
       <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
           <div>
+            <p className="flex items-center gap-2 text-sm text-gray-500">
+              <span>Portfolio Trend vs S&amp;P 500</span>
+              {updating && (
+                <span className="inline-flex items-center gap-1.5 text-xs text-indigo-600">
+                  <span className="h-2 w-2 animate-pulse rounded-full bg-indigo-500" />
+                  Updating…
+                </span>
+              )}
+            </p>
             <p className="text-sm text-gray-500">
-              Portfolio Trend vs S&amp;P 500{" "}
               {showsPortfolioLine ? (
                 <span className="text-xs text-gray-400">(baseline = your principal)</span>
               ) : (
