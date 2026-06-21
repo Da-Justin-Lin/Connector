@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+import AccountFilter from "@/components/AccountFilter";
 import api from "@/services/api";
 
 interface TradeRow {
@@ -124,6 +125,7 @@ export default function ReportsPage() {
     return { startDate: isoDate(start), endDate: isoDate(end) };
   }, [today, weekOffset]);
 
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [data, setData] = useState<WeeklyReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -131,14 +133,15 @@ export default function ReportsPage() {
   useEffect(() => {
     setLoading(true);
     setError(null);
+    const acct = selectedAccountId ? `&account_id=${selectedAccountId}` : "";
     api
       .get<WeeklyReport>(
-        `/api/v1/reports/weekly-trades?start_date=${startDate}&end_date=${endDate}`,
+        `/api/v1/reports/weekly-trades?start_date=${startDate}&end_date=${endDate}${acct}`,
       )
       .then(({ data }) => setData(data))
       .catch(() => setError("Failed to load report."))
       .finally(() => setLoading(false));
-  }, [startDate, endDate]);
+  }, [startDate, endDate, selectedAccountId]);
 
   const pnlTone =
     data?.week_pnl == null ? "default" : data.week_pnl >= 0 ? "up" : "down";
@@ -159,7 +162,8 @@ export default function ReportsPage() {
             {fmtDateLong(startDate)} – {fmtDateLong(endDate)}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <AccountFilter value={selectedAccountId} onChange={setSelectedAccountId} />
           <button
             onClick={() => setWeekOffset((w) => w - 1)}
             className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"

@@ -230,6 +230,7 @@ async def get_weekly_trades(
     days: int = 7,
     start_date: str | None = None,
     end_date: str | None = None,
+    account_id: str | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -248,11 +249,17 @@ async def get_weekly_trades(
 
     today = window_end
 
-    account_rows = await db.execute(
-        select(InvestmentAccount).where(InvestmentAccount.user_id == current_user.id)
+    acct_stmt = select(InvestmentAccount).where(
+        InvestmentAccount.user_id == current_user.id
     )
+    if account_id:
+        acct_stmt = acct_stmt.where(
+            InvestmentAccount.snaptrade_account_id == account_id
+        )
+    account_rows = await db.execute(acct_stmt)
     accounts = account_rows.scalars().all()
     account_ids = [a.snaptrade_account_id for a in accounts]
+    account_uuids = [a.id for a in accounts]
 
     trades: list[TradeRow] = []
     total_buys = 0.0
@@ -357,36 +364,43 @@ async def get_weekly_trades(
     window_end_dt = datetime.combine(
         window_end, datetime.max.time(), tzinfo=timezone.utc
     )
-    snap_start_row = await db.execute(
-        select(PortfolioSnapshot)
-        .where(
-            PortfolioSnapshot.user_id == current_user.id,
-            PortfolioSnapshot.snapshot_at >= window_start_dt,
+    # Portfolio snapshots are stored per-user (not per-account), so the
+    # snapshot-based portfolio P/L only applies to the all-accounts view.
+    # When filtered to one account we leave it blank and rely on the
+    # trade-matched P/L, which is naturally per-account.
+    window_start_value: float | None = None
+    window_end_value: float | None = None
+    if not account_id:
+        snap_start_row = await db.execute(
+            select(PortfolioSnapshot)
+            .where(
+                PortfolioSnapshot.user_id == current_user.id,
+                PortfolioSnapshot.snapshot_at >= window_start_dt,
+            )
+            .order_by(PortfolioSnapshot.snapshot_at.asc())
+            .limit(1)
         )
-        .order_by(PortfolioSnapshot.snapshot_at.asc())
-        .limit(1)
-    )
-    snap_end_row = await db.execute(
-        select(PortfolioSnapshot)
-        .where(
-            PortfolioSnapshot.user_id == current_user.id,
-            PortfolioSnapshot.snapshot_at <= window_end_dt,
+        snap_end_row = await db.execute(
+            select(PortfolioSnapshot)
+            .where(
+                PortfolioSnapshot.user_id == current_user.id,
+                PortfolioSnapshot.snapshot_at <= window_end_dt,
+            )
+            .order_by(PortfolioSnapshot.snapshot_at.desc())
+            .limit(1)
         )
-        .order_by(PortfolioSnapshot.snapshot_at.desc())
-        .limit(1)
-    )
-    first_snap = snap_start_row.scalar_one_or_none()
-    last_snap = snap_end_row.scalar_one_or_none()
+        first_snap = snap_start_row.scalar_one_or_none()
+        last_snap = snap_end_row.scalar_one_or_none()
+        window_start_value = float(first_snap.total_value) if first_snap else None
+        window_end_value = float(last_snap.total_value) if last_snap else None
 
-    window_start_value = float(first_snap.total_value) if first_snap else None
-    window_end_value = float(last_snap.total_value) if last_snap else None
-
-    deposit_rows = await db.execute(
-        select(Deposit).where(
-            Deposit.user_id == current_user.id,
-            Deposit.deposited_at >= window_start_dt,
-        )
+    dep_stmt = select(Deposit).where(
+        Deposit.user_id == current_user.id,
+        Deposit.deposited_at >= window_start_dt,
     )
+    if account_id and account_uuids:
+        dep_stmt = dep_stmt.where(Deposit.investment_account_id.in_(account_uuids))
+    deposit_rows = await db.execute(dep_stmt)
     window_deposits = round(
         sum(float(d.amount) for d in deposit_rows.scalars().all()), 2
     )
