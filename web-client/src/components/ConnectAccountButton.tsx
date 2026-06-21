@@ -10,11 +10,11 @@ export default function ConnectAccountButton() {
 
   return (
     <div className="flex flex-col items-end gap-1">
-      {error && <p className="text-xs text-red-500">{error}</p>}
+      {error && <p className="text-xs text-down">{error}</p>}
       <button
         onClick={() => open()}
         disabled={loading}
-        className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
+        className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
       >
         {loading ? "Loading…" : "Connect Account"}
       </button>

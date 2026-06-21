@@ -110,16 +110,16 @@ export default function QuoteGrid({
     : symbols.map((s) => quotes.find((q) => q.symbol === s)).filter((q): q is Quote => !!q);
 
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+    <div className="card p-5">
       <div className="flex items-baseline justify-between">
-        <p className="text-base font-semibold text-gray-900">{title}</p>
-        {subtitle && <p className="text-xs text-gray-500">{subtitle}</p>}
+        <p className="text-base font-semibold text-content">{title}</p>
+        {subtitle && <p className="text-xs text-muted">{subtitle}</p>}
       </div>
 
       {loading ? (
-        <p className="mt-4 text-sm text-gray-400">Loading…</p>
+        <p className="mt-4 text-sm text-faint">Loading…</p>
       ) : error && ordered.length === 0 ? (
-        <p className="mt-4 text-sm text-gray-500">Market data unavailable right now.</p>
+        <p className="mt-4 text-sm text-muted">Market data unavailable right now.</p>
       ) : (
         <>
           <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
@@ -128,14 +128,14 @@ export default function QuoteGrid({
               return (
                 <div
                   key={q.symbol}
-                  className="rounded-lg border border-gray-100 p-3"
+                  className="rounded-lg border border-line/60 p-3"
                   style={heatmap ? { background: heatColor(q.change_pct) } : undefined}
                 >
-                  <p className="truncate text-xs font-medium text-gray-600">
+                  <p className="truncate text-xs font-medium text-muted">
                     {labels[q.symbol] ?? q.symbol}
                   </p>
-                  <p className="mt-0.5 text-sm font-bold text-gray-900">{fmtValue(q, kind)}</p>
-                  <p className={`text-xs font-medium ${up ? "text-emerald-600" : "text-rose-600"}`}>
+                  <p className="mt-0.5 text-sm font-bold text-content">{fmtValue(q, kind)}</p>
+                  <p className={`text-xs font-medium ${up ? "text-up" : "text-down"}`}>
                     {fmtChange(q, kind)}
                   </p>
                 </div>
@@ -143,7 +143,7 @@ export default function QuoteGrid({
             })}
           </div>
           {renderFooter && ordered.length > 0 && (
-            <div className="mt-3 border-t border-gray-100 pt-3">{renderFooter(quotes)}</div>
+            <div className="mt-3 border-t border-line/60 pt-3">{renderFooter(quotes)}</div>
           )}
         </>
       )}

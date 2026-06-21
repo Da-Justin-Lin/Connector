@@ -138,16 +138,16 @@ function CarpetTooltip({ active, payload }: { active?: boolean; payload?: Array<
     | undefined;
   if (!node?.symbol) return null;
   return (
-    <div className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-xs text-white shadow-lg">
+    <div className="rounded-lg border border-line bg-surface-2 px-3 py-2 text-xs text-content shadow-lift">
       <p className="font-semibold">
-        {node.symbol} <span className="font-normal text-gray-400">{node.fullName}</span>
+        {node.symbol} <span className="font-normal text-faint">{node.fullName}</span>
       </p>
-      <p className="text-gray-400">{node.sector}</p>
+      <p className="text-faint">{node.sector}</p>
       <p className="mt-1">
-        <span className={node.change_pct != null && node.change_pct >= 0 ? "text-emerald-400" : "text-rose-400"}>
+        <span className={node.change_pct != null && node.change_pct >= 0 ? "text-up" : "text-down"}>
           {fmtPct(node.change_pct)}
         </span>
-        <span className="ml-2 text-gray-400">{node.size != null ? fmtCap(node.size) : ""}</span>
+        <span className="ml-2 text-faint">{node.size != null ? fmtCap(node.size) : ""}</span>
       </p>
     </div>
   );
@@ -202,15 +202,15 @@ export default function MarketMap() {
   );
 
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+    <div className="card p-5">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div>
-          <p className="text-base font-semibold text-gray-900">Market map</p>
-          <p className="text-xs text-gray-500">
+          <p className="text-base font-semibold text-content">Market map</p>
+          <p className="text-xs text-muted">
             S&amp;P mega-caps by sector — cell size = market cap, color = today&apos;s move
           </p>
         </div>
-        <div className="flex items-center gap-2 text-[10px] text-gray-500">
+        <div className="flex items-center gap-2 text-[10px] text-muted">
           <span>−3%</span>
           <span className="h-2 w-32 rounded-full" style={{
             background: "linear-gradient(to right, #f43f5e, #334155, #22c55e)",
@@ -220,9 +220,9 @@ export default function MarketMap() {
       </div>
 
       {loading ? (
-        <p className="mt-4 text-sm text-gray-400">Building market map…</p>
+        <p className="mt-4 text-sm text-faint">Building market map…</p>
       ) : error && groups.length === 0 ? (
-        <p className="mt-4 text-sm text-gray-500">{error}</p>
+        <p className="mt-4 text-sm text-muted">{error}</p>
       ) : (
         <div className="mt-4 overflow-hidden rounded-lg bg-[#0b0f17] p-1">
           <div className="h-[520px] w-full">

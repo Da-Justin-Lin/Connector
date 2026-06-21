@@ -109,15 +109,15 @@ export default function MarketSnapshotCard({ snap }: { snap: Snapshot }) {
   }, [snap.candles]);
 
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+    <div className="card card-hover p-5">
       <div className="flex items-start justify-between">
         <div>
-          <p className="text-sm font-semibold text-gray-900">{snap.symbol}</p>
-          <p className="text-xs text-gray-500">{LABELS[snap.symbol] ?? ""}</p>
+          <p className="text-sm font-semibold text-content">{snap.symbol}</p>
+          <p className="text-xs text-muted">{LABELS[snap.symbol] ?? ""}</p>
         </div>
         <div className="text-right">
-          <p className="text-lg font-bold text-gray-900">{fmtPrice(snap.last_price)}</p>
-          <p className={`text-xs font-medium ${up ? "text-emerald-600" : "text-rose-600"}`}>
+          <p className="text-lg font-bold text-content">{fmtPrice(snap.last_price)}</p>
+          <p className={`text-xs font-medium ${up ? "text-up" : "text-down"}`}>
             {snap.change == null ? "—" : `${up ? "+" : "−"}${fmtPrice(Math.abs(snap.change))}`}{" "}
             ({fmtPct(snap.change_pct)})
           </p>
@@ -126,7 +126,7 @@ export default function MarketSnapshotCard({ snap }: { snap: Snapshot }) {
       <div className="relative mt-3 h-28">
         <div ref={hostRef} className="absolute inset-0" />
         {snap.candles.length === 0 && (
-          <div className="absolute inset-0 flex items-center justify-center text-xs text-gray-400">
+          <div className="absolute inset-0 flex items-center justify-center text-xs text-faint">
             No intraday data
           </div>
         )}

@@ -138,11 +138,11 @@ export default function DepositsPage() {
   return (
     <div className="flex flex-col gap-8">
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <h1 className="text-2xl font-bold text-gray-900">Deposits</h1>
+        <h1 className="text-2xl font-bold text-content">Deposits</h1>
         {data && (
-          <div className="rounded-xl border border-gray-200 bg-white px-6 py-3 shadow-sm">
-            <p className="text-xs text-gray-500">Total Principal</p>
-            <p className="text-2xl font-bold text-gray-900">${fmt(data.total_principal)}</p>
+          <div className="card px-6 py-3">
+            <p className="text-xs text-muted">Total Principal</p>
+            <p className="text-2xl font-bold text-content">${fmt(data.total_principal)}</p>
           </div>
         )}
       </div>
@@ -152,14 +152,14 @@ export default function DepositsPage() {
           {data.per_account.map((pa) => (
             <div
               key={pa.investment_account_id}
-              className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm"
+              className="card p-4"
             >
-              <p className="text-xs text-gray-500">{accountLabel(pa)}</p>
-              <p className="mt-1 text-xl font-bold text-gray-900">
+              <p className="text-xs text-muted">{accountLabel(pa)}</p>
+              <p className="mt-1 text-xl font-bold text-content">
                 ${fmt(pa.total_principal)}
               </p>
               {pa.account_name && pa.institution_name && (
-                <p className="text-xs text-gray-400">{pa.account_name}</p>
+                <p className="text-xs text-faint">{pa.account_name}</p>
               )}
             </div>
           ))}
@@ -168,17 +168,17 @@ export default function DepositsPage() {
 
       <form
         onSubmit={submit}
-        className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm"
+        className="card p-6"
       >
-        <p className="mb-4 text-sm font-medium text-gray-700">Add a deposit</p>
+        <p className="mb-4 text-sm font-medium text-content">Add a deposit</p>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-5">
           <div className="sm:col-span-2">
-            <label className="block text-xs font-medium text-gray-500">Account</label>
+            <label className="block text-xs font-medium text-muted">Account</label>
             <select
               value={accountId}
               onChange={(e) => setAccountId(e.target.value)}
               required
-              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+              className="mt-1 w-full rounded-md border border-line px-3 py-2 text-sm focus:border-brand focus:outline-none"
             >
               {accounts.length === 0 && (
                 <option value="">No connected accounts</option>
@@ -192,7 +192,7 @@ export default function DepositsPage() {
             </select>
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-500">Amount ($)</label>
+            <label className="block text-xs font-medium text-muted">Amount ($)</label>
             <input
               type="number"
               step="0.01"
@@ -200,77 +200,77 @@ export default function DepositsPage() {
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               required
-              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+              className="mt-1 w-full rounded-md border border-line px-3 py-2 text-sm focus:border-brand focus:outline-none"
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-500">Date</label>
+            <label className="block text-xs font-medium text-muted">Date</label>
             <input
               type="date"
               value={depositedAt}
               onChange={(e) => setDepositedAt(e.target.value)}
               required
-              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+              className="mt-1 w-full rounded-md border border-line px-3 py-2 text-sm focus:border-brand focus:outline-none"
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-500">Note</label>
+            <label className="block text-xs font-medium text-muted">Note</label>
             <input
               type="text"
               value={note}
               onChange={(e) => setNote(e.target.value)}
               placeholder="optional"
-              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+              className="mt-1 w-full rounded-md border border-line px-3 py-2 text-sm focus:border-brand focus:outline-none"
             />
           </div>
         </div>
         <button
           type="submit"
           disabled={submitting || accounts.length === 0}
-          className="mt-4 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+          className="mt-4 rounded-md bg-brand px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
         >
           {submitting ? "Adding…" : "Add deposit"}
         </button>
       </form>
 
-      {error && <p className="text-sm text-rose-500">{error}</p>}
+      {error && <p className="text-sm text-down">{error}</p>}
 
-      <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+      <div className="overflow-hidden card">
         {loading ? (
-          <p className="px-6 py-8 text-center text-sm text-gray-400">Loading…</p>
+          <p className="px-6 py-8 text-center text-sm text-faint">Loading…</p>
         ) : !data || data.deposits.length === 0 ? (
-          <p className="px-6 py-8 text-center text-sm text-gray-500">
+          <p className="px-6 py-8 text-center text-sm text-muted">
             No deposits yet. Add your starting principal above.
           </p>
         ) : (
-          <table className="min-w-full divide-y divide-gray-200 text-sm">
-            <thead className="bg-gray-50">
+          <table className="min-w-full divide-y divide-line text-sm">
+            <thead className="bg-surface-2">
               <tr>
                 {["Date", "Account", "Amount", "Note", ""].map((h) => (
                   <th
                     key={h}
-                    className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500"
+                    className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted"
                   >
                     {h}
                   </th>
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody className="divide-y divide-line">
               {data.deposits.map((d) => {
                 const acc = accountLookup.get(d.investment_account_id);
                 return (
-                  <tr key={d.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-3 text-gray-700">{fmtDate(d.deposited_at)}</td>
-                    <td className="px-6 py-3 text-gray-700">
+                  <tr key={d.id} className="hover:bg-surface-2">
+                    <td className="px-6 py-3 text-content">{fmtDate(d.deposited_at)}</td>
+                    <td className="px-6 py-3 text-content">
                       {acc ? accountLabel(acc) : "—"}
                     </td>
-                    <td className="px-6 py-3 font-medium text-gray-900">${fmt(d.amount)}</td>
-                    <td className="px-6 py-3 text-gray-500">{d.note ?? "—"}</td>
+                    <td className="px-6 py-3 font-medium text-content">${fmt(d.amount)}</td>
+                    <td className="px-6 py-3 text-muted">{d.note ?? "—"}</td>
                     <td className="px-6 py-3 text-right">
                       <button
                         onClick={() => remove(d.id)}
-                        className="text-xs font-medium text-rose-600 hover:text-rose-800"
+                        className="text-xs font-medium text-down hover:text-down hover:opacity-80"
                       >
                         Delete
                       </button>

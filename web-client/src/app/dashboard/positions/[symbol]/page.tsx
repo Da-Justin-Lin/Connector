@@ -49,10 +49,10 @@ function fmtDate(iso: string) {
 }
 
 function StatCard({ label, value, tone = "default" }: { label: string; value: string; tone?: "default" | "up" | "down" }) {
-  const color = tone === "up" ? "text-emerald-600" : tone === "down" ? "text-rose-600" : "text-gray-900";
+  const color = tone === "up" ? "text-up" : tone === "down" ? "text-down" : "text-content";
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-      <p className="text-sm text-gray-500">{label}</p>
+    <div className="card p-5">
+      <p className="text-sm text-muted">{label}</p>
       <p className={`mt-1 text-2xl font-bold ${color}`}>{value}</p>
     </div>
   );
@@ -83,23 +83,23 @@ export default function PositionPage() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <Link href="/dashboard" className="text-sm text-indigo-600 hover:underline">
+        <Link href="/dashboard" className="text-sm text-brand hover:underline">
           ← Back to overview
         </Link>
       </div>
 
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">{symbol}</h1>
-          <p className="text-sm text-gray-500">{detail?.name ?? "—"}</p>
+          <h1 className="text-2xl font-bold text-content">{symbol}</h1>
+          <p className="text-sm text-muted">{detail?.name ?? "—"}</p>
         </div>
         {price !== null && (
-          <p className="text-2xl font-bold text-gray-900">${fmt(price)}</p>
+          <p className="text-2xl font-bold text-content">${fmt(price)}</p>
         )}
       </div>
 
       {/* Price chart */}
-      <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+      <div className="card p-4">
         <div className="h-80">
           <PriceChart symbol={symbol} onLatest={(close) => setPrice(close)} />
         </div>
@@ -107,7 +107,7 @@ export default function PositionPage() {
 
       {/* Your position */}
       {loading ? (
-        <p className="text-sm text-gray-400">Loading position…</p>
+        <p className="text-sm text-faint">Loading position…</p>
       ) : detail && detail.held ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard label="Quantity" value={detail.quantity.toLocaleString("en-US", { maximumFractionDigits: 4 })} />
@@ -120,57 +120,57 @@ export default function PositionPage() {
           />
         </div>
       ) : detail ? (
-        <p className="text-sm text-gray-500">
+        <p className="text-sm text-muted">
           You don&apos;t currently hold {symbol}.
           {detail.trades.length > 0 ? " Past trades are shown below." : ""}
         </p>
       ) : (
-        <p className="text-sm text-rose-500">Failed to load position details.</p>
+        <p className="text-sm text-down">Failed to load position details.</p>
       )}
 
       {/* Trade history */}
-      <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
-        <div className="border-b border-gray-200 bg-gray-50 px-6 py-4">
-          <p className="text-base font-semibold text-gray-900">Your trade history</p>
-          <p className="mt-0.5 text-xs text-gray-500">Filled buys and sells for {symbol} across your accounts.</p>
+      <div className="overflow-hidden card">
+        <div className="border-b border-line bg-surface-2 px-6 py-4">
+          <p className="text-base font-semibold text-content">Your trade history</p>
+          <p className="mt-0.5 text-xs text-muted">Filled buys and sells for {symbol} across your accounts.</p>
         </div>
         {!detail || detail.trades.length === 0 ? (
-          <p className="px-6 py-8 text-center text-sm text-gray-500">
+          <p className="px-6 py-8 text-center text-sm text-muted">
             {loading ? "Loading…" : "No recorded trades for this symbol."}
           </p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200 text-sm">
-              <thead className="bg-white">
+            <table className="min-w-full divide-y divide-line text-sm">
+              <thead className="bg-surface">
                 <tr>
                   {["Date", "Action", "Units", "Price", "Amount"].map((h) => (
                     <th
                       key={h}
-                      className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500"
+                      className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted"
                     >
                       {h}
                     </th>
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-line">
                 {detail.trades.map((t, i) => (
-                  <tr key={i} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 text-gray-700">{fmtDate(t.trade_date)}</td>
-                    <td className={`px-4 py-3 font-medium ${t.action === "BUY" ? "text-emerald-600" : "text-rose-600"}`}>
+                  <tr key={i} className="hover:bg-surface-2">
+                    <td className="px-4 py-3 text-content">{fmtDate(t.trade_date)}</td>
+                    <td className={`px-4 py-3 font-medium ${t.action === "BUY" ? "text-up" : "text-down"}`}>
                       {t.action}
                       {t.asset_type === "OPTION" && (
-                        <span className="ml-2 rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-700">
+                        <span className="ml-2 rounded bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand">
                           Option
                         </span>
                       )}
                       {t.asset_type === "OPTION" && t.description && (
-                        <div className="text-xs font-normal text-gray-500">{t.description}</div>
+                        <div className="text-xs font-normal text-muted">{t.description}</div>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-gray-700">{t.units.toFixed(4)}</td>
-                    <td className="px-4 py-3 text-gray-700">${t.price.toFixed(2)}</td>
-                    <td className="px-4 py-3 font-medium text-gray-900">${fmt(Math.abs(t.amount))}</td>
+                    <td className="px-4 py-3 text-content">{t.units.toFixed(4)}</td>
+                    <td className="px-4 py-3 text-content">${t.price.toFixed(2)}</td>
+                    <td className="px-4 py-3 font-medium text-content">${fmt(Math.abs(t.amount))}</td>
                   </tr>
                 ))}
               </tbody>

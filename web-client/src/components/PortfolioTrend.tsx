@@ -135,12 +135,12 @@ function ReturnCard({
   tone?: "default" | "up" | "down";
 }) {
   const valueColor =
-    tone === "up" ? "text-emerald-600" : tone === "down" ? "text-rose-600" : "text-gray-900";
+    tone === "up" ? "text-up" : tone === "down" ? "text-down" : "text-content";
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-      <p className="text-xs text-gray-500">{label}</p>
+    <div className="card card-hover p-4">
+      <p className="text-xs text-muted">{label}</p>
       <p className={`mt-1 text-xl font-bold ${valueColor}`}>{fmtPct(pct)}</p>
-      <p className="text-xs text-gray-500">{fmtMoney(delta)}</p>
+      <p className="text-xs text-muted">{fmtMoney(delta)}</p>
     </div>
   );
 }
@@ -168,28 +168,28 @@ function CustomTooltip({ active, payload, label, isIntraday }: CustomTooltipProp
 
   const portfolioColor =
     point.portfolioPct == null
-      ? "text-gray-500"
+      ? "text-muted"
       : point.portfolioPct >= 0
-        ? "text-emerald-600"
-        : "text-rose-600";
+        ? "text-up"
+        : "text-down";
 
   const benchmarkColor =
     point.benchmarkPct == null
-      ? "text-gray-500"
+      ? "text-muted"
       : point.benchmarkPct >= 0
-        ? "text-emerald-600"
-        : "text-rose-600";
+        ? "text-up"
+        : "text-down";
 
   return (
-    <div className="rounded-md border border-gray-200 bg-white px-3 py-2 text-xs shadow-md">
-      <p className="font-medium text-gray-700">
+    <div className="rounded-md border border-line bg-surface px-3 py-2 text-xs shadow-md">
+      <p className="font-medium text-content">
         {formatTooltipLabel(String(label ?? ""), isIntraday)}
       </p>
       <div className="mt-1 space-y-0.5">
         <p>
-          <span className="inline-block h-2 w-2 rounded-full bg-indigo-600 mr-1.5 align-middle" />
-          <span className="text-gray-600">Portfolio: </span>
-          <span className="font-semibold text-gray-900">${fmt(point.value)}</span>
+          <span className="inline-block h-2 w-2 rounded-full bg-brand mr-1.5 align-middle" />
+          <span className="text-muted">Portfolio: </span>
+          <span className="font-semibold text-content">${fmt(point.value)}</span>
           <span className={`ml-2 font-semibold ${portfolioColor}`}>
             {point.portfolioPct == null
               ? ""
@@ -197,14 +197,14 @@ function CustomTooltip({ active, payload, label, isIntraday }: CustomTooltipProp
           </span>
         </p>
         {point.principal > 0 && (
-          <p className="text-gray-500">
+          <p className="text-muted">
             Principal: ${fmt(point.principal)} · Δ {fmtMoney(point.delta)}
           </p>
         )}
         {point.benchmarkPct != null && (
           <p>
-            <span className="inline-block h-2 w-2 rounded-full bg-gray-400 mr-1.5 align-middle" />
-            <span className="text-gray-600">S&amp;P 500: </span>
+            <span className="inline-block h-2 w-2 rounded-full bg-faint mr-1.5 align-middle" />
+            <span className="text-muted">S&amp;P 500: </span>
             <span className={`font-semibold ${benchmarkColor}`}>
               {point.benchmarkPct >= 0 ? "+" : ""}
               {point.benchmarkPct.toFixed(2)}%
@@ -371,38 +371,38 @@ export default function PortfolioTrend({ accountId = null }: PortfolioTrendProps
         </div>
       )}
 
-      <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+      <div className="card p-6">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
           <div>
-            <p className="flex items-center gap-2 text-sm text-gray-500">
+            <p className="flex items-center gap-2 text-sm text-muted">
               <span>Portfolio Trend vs S&amp;P 500</span>
               {updating && (
-                <span className="inline-flex items-center gap-1.5 text-xs text-indigo-600">
-                  <span className="h-2 w-2 animate-pulse rounded-full bg-indigo-500" />
+                <span className="inline-flex items-center gap-1.5 text-xs text-brand">
+                  <span className="h-2 w-2 animate-pulse rounded-full bg-brand" />
                   Updating…
                 </span>
               )}
             </p>
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-muted">
               {showsPortfolioLine ? (
-                <span className="text-xs text-gray-400">(baseline = your principal)</span>
+                <span className="text-xs text-faint">(baseline = your principal)</span>
               ) : (
-                <span className="text-xs text-gray-400">
+                <span className="text-xs text-faint">
                   (add deposits to baseline against principal)
                 </span>
               )}
             </p>
-            <p className="mt-1 text-2xl font-bold text-gray-900">{currentValueDisplay}</p>
+            <p className="mt-1 text-2xl font-bold text-content">{currentValueDisplay}</p>
           </div>
-          <div className="flex gap-1 rounded-lg bg-gray-100 p-1">
+          <div className="flex gap-1 rounded-lg bg-surface-2 p-1">
             {RANGES.map((r) => (
               <button
                 key={r.label}
                 onClick={() => setRange(r.label)}
                 className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
                   range === r.label
-                    ? "bg-white text-gray-900 shadow-sm"
-                    : "text-gray-500 hover:text-gray-700"
+                    ? "bg-surface text-content shadow-sm"
+                    : "text-muted hover:text-content"
                 }`}
               >
                 {r.label}
@@ -413,15 +413,15 @@ export default function PortfolioTrend({ accountId = null }: PortfolioTrendProps
 
         <div className="h-64">
           {historyLoading ? (
-            <div className="flex h-full items-center justify-center text-sm text-gray-400">
+            <div className="flex h-full items-center justify-center text-sm text-faint">
               Loading…
             </div>
           ) : history && !history.available ? (
-            <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-sm text-gray-500">
+            <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-sm text-muted">
               <p>{history.message ?? "Historical data is not available yet."}</p>
             </div>
           ) : displayedData.length === 0 ? (
-            <div className="flex h-full items-center justify-center text-center text-sm text-gray-400">
+            <div className="flex h-full items-center justify-center text-center text-sm text-faint">
               {history?.message ?? "No data points in this range yet."}
             </div>
           ) : (

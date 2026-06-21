@@ -20,8 +20,8 @@ function CallbackHandler() {
   }, [router, searchParams]);
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50">
-      <p className="text-gray-500">Signing you in…</p>
+    <div className="flex min-h-screen items-center justify-center bg-surface-2">
+      <p className="text-muted">Signing you in…</p>
     </div>
   );
 }

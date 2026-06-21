@@ -1,3 +1,78 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ------------------------------------------------------------------ */
+/*  Design tokens — semantic colors as space-separated RGB channels    */
+/*  so Tailwind can apply alpha via rgb(var(--x) / <alpha-value>).      */
+/* ------------------------------------------------------------------ */
+:root {
+  --canvas: 248 250 252; /* slate-50 */
+  --canvas-glow-1: 224 231 255; /* indigo-100 */
+  --canvas-glow-2: 237 233 254; /* violet-100 */
+  --surface: 255 255 255;
+  --surface-2: 248 250 252; /* slate-50 */
+  --content: 17 24 39; /* gray-900 */
+  --muted: 107 114 128; /* gray-500 */
+  --faint: 156 163 175; /* gray-400 */
+  --line: 229 231 235; /* gray-200 */
+  --brand: 79 70 229; /* indigo-600 */
+  --brand-2: 124 58 237; /* violet-600 */
+  --brand-soft: 238 242 255; /* indigo-50 */
+  --up: 16 185 129; /* emerald-500 */
+  --down: 244 63 94; /* rose-500 */
+
+  --shadow-soft: 0 1px 2px rgb(15 23 42 / 0.04), 0 4px 16px rgb(15 23 42 / 0.06);
+  --shadow-lift: 0 8px 30px rgb(15 23 42 / 0.12);
+}
+
+.dark {
+  --canvas: 2 6 23; /* slate-950 */
+  --canvas-glow-1: 49 46 129; /* indigo-900 */
+  --canvas-glow-2: 76 29 149; /* violet-900 */
+  --surface: 15 23 42; /* slate-900 */
+  --surface-2: 30 41 59; /* slate-800 */
+  --content: 241 245 249; /* slate-100 */
+  --muted: 148 163 184; /* slate-400 */
+  --faint: 100 116 139; /* slate-500 */
+  --line: 51 65 85; /* slate-700 */
+  --brand: 129 140 248; /* indigo-400 */
+  --brand-2: 167 139 250; /* violet-400 */
+  --brand-soft: 30 27 75; /* indigo-950 */
+  --up: 52 211 153; /* emerald-400 */
+  --down: 251 113 133; /* rose-400 */
+
+  --shadow-soft: 0 1px 2px rgb(0 0 0 / 0.3), 0 4px 20px rgb(0 0 0 / 0.4);
+  --shadow-lift: 0 10px 40px rgb(0 0 0 / 0.55);
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    color: rgb(var(--content));
+    background-color: rgb(var(--canvas));
+    /* Soft ambient glows so the page never reads as flat. */
+    background-image:
+      radial-gradient(60rem 60rem at 100% -10%, rgb(var(--canvas-glow-1) / 0.55), transparent 60%),
+      radial-gradient(50rem 50rem at -10% 110%, rgb(var(--canvas-glow-2) / 0.45), transparent 55%);
+    background-attachment: fixed;
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+@layer components {
+  /* Card surface used across the app. */
+  .card {
+    @apply rounded-2xl border border-line/70 bg-surface/80 shadow-soft backdrop-blur-sm;
+  }
+  .card-hover {
+    @apply transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lift;
+  }
+}
+
+/* Recharts: inherit theme colors instead of hard-coded greys. */
+.recharts-cartesian-grid line {
+  stroke: rgb(var(--line) / 0.6);
+}
