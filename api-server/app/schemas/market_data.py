@@ -81,3 +81,22 @@ class CryptoFearGreedResponse(BaseModel):
     prev_close: float | None = None
     available: bool = True
     message: str | None = None
+
+
+class MarketMapItem(BaseModel):
+    symbol: str
+    name: str
+    market_cap: float
+    last: float | None = None
+    change_pct: float | None = None
+
+
+class MarketMapGroup(BaseModel):
+    sector: str
+    items: list[MarketMapItem]
+
+
+class MarketMapResponse(BaseModel):
+    groups: list[MarketMapGroup]
+    available: bool = True
+    message: str | None = None
