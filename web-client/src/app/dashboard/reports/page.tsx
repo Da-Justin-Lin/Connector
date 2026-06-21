@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import AccountFilter from "@/components/AccountFilter";
 import api from "@/services/api";
@@ -49,6 +49,8 @@ interface WeeklyReport {
   pnl_by_instrument: InstrumentPnL[];
   available: boolean;
   message: string | null;
+  stale?: boolean;
+  last_synced_at?: string | null;
 }
 
 function fmt(n: number) {
@@ -137,6 +139,10 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(true);
   const [revalidating, setRevalidating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Bumped to re-fetch after the server reports `stale` (a background refresh
+  // is in flight); capped per window so we don't poll forever.
+  const [refreshTick, setRefreshTick] = useState(0);
+  const staleAttempts = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
     const key = cacheKey(selectedAccountId, startDate, endDate);
@@ -154,6 +160,7 @@ export default function ReportsPage() {
     setError(null);
 
     let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
     const acct = selectedAccountId ? `&account_id=${selectedAccountId}` : "";
     api
       .get<WeeklyReport>(
@@ -161,7 +168,19 @@ export default function ReportsPage() {
       )
       .then(({ data }) => {
         reportCache.set(key, data);
-        if (!cancelled) setData(data);
+        if (cancelled) return;
+        setData(data);
+        // If the server is refreshing in the background, pull the fresh copy
+        // once it should be ready (up to a few attempts per window).
+        if (data.stale) {
+          const tries = staleAttempts.current.get(key) ?? 0;
+          if (tries < 3) {
+            staleAttempts.current.set(key, tries + 1);
+            retryTimer = setTimeout(() => setRefreshTick((t) => t + 1), 3000);
+          }
+        } else {
+          staleAttempts.current.delete(key);
+        }
       })
       .catch(() => {
         if (!cancelled && !cached) setError("Failed to load report.");
@@ -175,8 +194,9 @@ export default function ReportsPage() {
 
     return () => {
       cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
     };
-  }, [startDate, endDate, selectedAccountId]);
+  }, [startDate, endDate, selectedAccountId, refreshTick]);
 
   const pnlTone =
     data?.week_pnl == null ? "default" : data.week_pnl >= 0 ? "up" : "down";
@@ -194,7 +214,7 @@ export default function ReportsPage() {
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-bold text-gray-900">Weekly Report</h1>
-            {revalidating && data && (
+            {(revalidating || data?.stale) && data && (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700">
                 <span className="h-2 w-2 animate-pulse rounded-full bg-indigo-500" />
                 Updating…

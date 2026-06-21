@@ -70,3 +70,7 @@ class WeeklyReportResponse(BaseModel):
     pnl_by_instrument: list[InstrumentPnL] = []
     available: bool
     message: str | None = None
+    # Cache state: data is served from the local store; `stale` means a
+    # background refresh is in flight and newer data may follow.
+    stale: bool = False
+    last_synced_at: str | None = None

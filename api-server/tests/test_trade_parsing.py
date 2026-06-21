@@ -18,7 +18,9 @@ from app.services.trade_parsing import (
     extract_order_symbol,
     format_option_contract,
     normalize_instrument_key,
+    order_dedup_key,
     order_executed_date,
+    parse_executed_datetime,
     parse_order,
     summarize_trades,
 )
@@ -347,3 +349,37 @@ def test_build_holdings_map_equity_and_option():
 def test_build_holdings_map_tolerates_junk():
     assert build_holdings_map(None) == {}
     assert build_holdings_map({"results": ["bad", {"price": 1}]}) == {}
+
+
+# --- cache helpers (order dedup key + executed_at parsing) ------------------
+
+def test_order_dedup_key_prefers_broker_id():
+    assert order_dedup_key({"brokerage_order_id": "abc123"}) == "abc123"
+    assert order_dedup_key({"id": "xyz"}) == "xyz"
+
+
+def test_order_dedup_key_is_stable_content_hash_without_id():
+    order = {
+        "action": "BUY",
+        "units": 2,
+        "execution_price": 3.25,
+        "time_executed": "2026-06-19T15:45:00Z",
+    }
+    k1 = order_dedup_key(dict(order))
+    k2 = order_dedup_key(dict(order))
+    assert k1 == k2 and k1.startswith("syn_")
+    # A different fill yields a different key.
+    other = {**order, "units": 3}
+    assert order_dedup_key(other) != k1
+
+
+def test_parse_executed_datetime_handles_z_and_date_only():
+    dt = parse_executed_datetime("2026-06-19T15:45:00Z")
+    assert dt is not None and dt.tzinfo is not None
+    assert dt.year == 2026 and dt.hour == 15
+
+    date_only = parse_executed_datetime("2026-06-19")
+    assert date_only is not None and date_only.tzinfo is not None
+
+    assert parse_executed_datetime(None) is None
+    assert parse_executed_datetime("garbage") is None

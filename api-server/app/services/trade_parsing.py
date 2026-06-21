@@ -4,7 +4,9 @@ Kept free of FastAPI/DB/network imports so they can be unit-tested in
 isolation. The weekly-trades endpoint composes these.
 """
 
+import hashlib
 from collections import defaultdict, deque
+from datetime import datetime, timezone
 
 # Each option contract controls this many shares; premiums are quoted per share.
 OPTION_CONTRACT_MULTIPLIER = 100
@@ -156,6 +158,52 @@ def order_executed_date(order: dict) -> str | None:
     """Best-effort YYYY-MM-DD date an order was executed/placed."""
     ts = order_executed_timestamp(order)
     return ts[:10] if ts else None
+
+
+def parse_executed_datetime(value) -> datetime | None:
+    """Parse a SnapTrade timestamp string into an aware datetime, or None.
+
+    Used to store an order's executed_at for SQL window filtering.
+    """
+    if not value:
+        return None
+    s = str(value).strip().replace("Z", "+00:00")
+    for candidate in (s, s[:10]):
+        try:
+            dt = datetime.fromisoformat(candidate)
+        except ValueError:
+            continue
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    return None
+
+
+def order_dedup_key(order: dict) -> str:
+    """Stable per-account key for upserting an order into the local cache.
+
+    Prefers the broker's order id; falls back to a content hash so repeated
+    syncs of the same fill collapse onto one row.
+    """
+    for field in ("brokerage_order_id", "id", "order_id"):
+        value = order.get(field)
+        if value:
+            return str(value)[:255]
+    basis = "|".join(
+        str(order.get(f))
+        for f in (
+            "action",
+            "side",
+            "units",
+            "total_quantity",
+            "price",
+            "execution_price",
+        )
+    )
+    digest = hashlib.sha1(
+        f"{basis}|{order_executed_timestamp(order)}".encode()
+    ).hexdigest()
+    return f"syn_{digest[:32]}"
 
 
 def order_effect(order: dict) -> str | None:

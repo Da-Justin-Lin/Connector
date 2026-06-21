@@ -1,14 +1,13 @@
-import asyncio
 import logging
-import uuid
 from datetime import date, datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.core.database import get_db
+from app.models.broker_order import BrokerOrder
 from app.models.deposit import Deposit
 from app.models.investment_account import InvestmentAccount
 from app.models.portfolio_snapshot import PortfolioSnapshot
@@ -22,11 +21,16 @@ from app.schemas.reports import (
     WeeklyReportResponse,
 )
 from app.services.market_data_service import CandleRange, fetch_candles
+from app.services.report_sync import (
+    COLD_BACKFILL_DAYS,
+    INCREMENTAL_DAYS,
+    REFRESH_TTL,
+    refresh_accounts_background,
+    sync_accounts,
+)
 from app.services.snaptrade_service import (
     fetch_account_balance,
-    fetch_account_orders_async,
     fetch_account_positions,
-    fetch_account_positions_async,
 )
 from app.services.trade_parsing import (
     build_holdings_map,
@@ -227,30 +231,28 @@ async def get_benchmark(
     )
 
 
-async def _orders_for_account(acct_id: str) -> tuple[str, list | None, str | None]:
-    """Fetch executed orders for one account, with a no-state-filter fallback.
+def _account_is_stale(
+    account: InvestmentAccount,
+    now: datetime,
+    is_current_window: bool,
+    window_end_dt: datetime,
+) -> bool:
+    """Whether an account's cached orders need a background refresh.
 
-    Returns (account_id, orders | None, error_detail | None). Never raises so
-    callers can gather across accounts and tolerate partial failure.
+    Current week: stale once the cache is older than the TTL. Past weeks are
+    immutable once settled, so they're fresh as long as we synced after the
+    window ended.
     """
-    try:
-        orders = await fetch_account_orders_async(acct_id, state="EXECUTED")
-        return acct_id, orders, None
-    except Exception as exc:
-        logger.warning("Orders fetch failed for account %s: %s", acct_id, exc)
-        # Some SDK builds reject the state filter — retry without it.
-        try:
-            orders = await fetch_account_orders_async(acct_id)
-            return acct_id, orders, None
-        except Exception as exc2:
-            logger.warning(
-                "Orders retry without state failed for %s: %s", acct_id, exc2
-            )
-            return acct_id, None, f"{type(exc2).__name__}: {exc2}"
+    if account.orders_synced_at is None:
+        return True
+    if is_current_window:
+        return account.orders_synced_at < now - REFRESH_TTL
+    return account.orders_synced_at <= window_end_dt
 
 
 @router.get("/weekly-trades", response_model=WeeklyReportResponse)
 async def get_weekly_trades(
+    background: BackgroundTasks,
     days: int = 7,
     start_date: str | None = None,
     end_date: str | None = None,
@@ -282,107 +284,127 @@ async def get_weekly_trades(
         )
     account_rows = await db.execute(acct_stmt)
     accounts = account_rows.scalars().all()
-    account_ids = [a.snaptrade_account_id for a in accounts]
     account_uuids = [a.id for a in accounts]
 
+    # Window datetime bounds. End-of-day inclusive matters for past weeks so we
+    # don't truncate the final day or grab today's snapshot value.
+    window_start_dt = datetime.combine(
+        window_start, datetime.min.time(), tzinfo=timezone.utc
+    )
+    window_end_dt = datetime.combine(
+        window_end, datetime.max.time(), tzinfo=timezone.utc
+    )
+    now = datetime.now(timezone.utc)
+    is_current_window = window_end >= date.today()
+
+    # Serve from the local cache; only call SnapTrade for cold accounts (never
+    # synced) inline, and refresh stale ones in the background.
+    sync_error: str | None = None
+    stale_account_ids: list = []
+    if accounts:
+        cold = [a for a in accounts if a.orders_synced_at is None]
+        if cold:
+            try:
+                await sync_accounts(db, cold, days=COLD_BACKFILL_DAYS)
+                await db.commit()
+            except Exception as exc:
+                logger.warning("Cold order sync failed: %s", exc)
+                sync_error = f"{type(exc).__name__}: {exc}"
+                # rollback expires the ORM instances; reload them so the rest
+                # of the request can read their (still-empty) cache fields.
+                await db.rollback()
+                accounts = (await db.execute(acct_stmt)).scalars().all()
+                account_uuids = [a.id for a in accounts]
+
+        # Background-refresh accounts that are already cached but stale. Cold
+        # accounts that just synced are fresh; ones that failed to sync stay
+        # None and are skipped here (retried inline on the next request).
+        stale_account_ids = [
+            a.id
+            for a in accounts
+            if a.orders_synced_at is not None
+            and _account_is_stale(a, now, is_current_window, window_end_dt)
+        ]
+        if stale_account_ids:
+            background.add_task(
+                refresh_accounts_background,
+                stale_account_ids,
+                INCREMENTAL_DAYS if is_current_window else COLD_BACKFILL_DAYS,
+            )
+
+    # Read stored orders for the window from the local cache.
     trades: list[TradeRow] = []
     total_buys = 0.0
     total_sells = 0.0
-    fetch_failed = False
-    debug_msg: str | None = None
-    fetch_error_detail: str | None = None
     raw_order_count = 0
     skipped_states: dict[str, int] = {}
     window_trades: list[dict] = []  # parsed dicts feeding trade-matched P/L
 
-    if account_ids:
-        # Fetch every account's orders concurrently (offloaded to threads), so
-        # latency is the slowest single call rather than the sum.
-        order_results = await asyncio.gather(
-            *(_orders_for_account(a) for a in account_ids)
+    if account_uuids:
+        stored_rows = await db.execute(
+            select(BrokerOrder).where(
+                BrokerOrder.investment_account_id.in_(account_uuids),
+                BrokerOrder.executed_at >= window_start_dt,
+                BrokerOrder.executed_at <= window_end_dt,
+            )
         )
-        any_account_succeeded = any(orders is not None for _, orders, _ in order_results)
-
-        for acct_id, orders, err in order_results:
-            if orders is None:
-                fetch_error_detail = err
+        stored_orders = stored_rows.scalars().all()
+        raw_order_count = len(stored_orders)
+        for bo in stored_orders:
+            order = bo.payload
+            if not isinstance(order, dict):
                 continue
 
-            raw_order_count += len(orders)
-            for order in orders:
-                if not isinstance(order, dict):
-                    continue
+            # Only count executed/filled trades
+            state = str(order.get("state") or order.get("status") or "").upper()
+            if state and state not in ("EXECUTED", "FILLED", "COMPLETED"):
+                skipped_states[state] = skipped_states.get(state, 0) + 1
+                continue
 
-                # Only count executed/filled trades
-                state = str(order.get("state") or order.get("status") or "").upper()
-                if state and state not in ("EXECUTED", "FILLED", "COMPLETED"):
-                    skipped_states[state] = skipped_states.get(state, 0) + 1
-                    continue
+            parsed = parse_order(order)
+            if parsed is None:
+                continue
 
-                parsed = parse_order(order)
-                if parsed is None:
-                    continue
+            try:
+                executed_date = date.fromisoformat(parsed["trade_date"])
+            except ValueError:
+                continue
+            if not (window_start <= executed_date <= window_end):
+                continue
 
-                try:
-                    executed_date = date.fromisoformat(parsed["trade_date"])
-                except ValueError:
-                    continue
-                if not (window_start <= executed_date <= window_end):
-                    continue
-
-                window_trades.append(parsed)
-                row = TradeRow(**parsed)
-                trades.append(row)
-                if row.action == "BUY":
-                    total_buys += row.amount
-                else:
-                    total_sells += row.amount
-
-        if not any_account_succeeded:
-            fetch_failed = True
-
-        if not trades and raw_order_count > 0:
-            top_states = sorted(
-                skipped_states.items(), key=lambda x: x[1], reverse=True
-            )[:3]
-            debug_msg = (
-                f"Pulled {raw_order_count} orders, none matched window "
-                f"{window_start}–{window_end}. Skipped states: "
-                f"{', '.join(s or 'UNKNOWN' for s, _ in top_states) or 'none'}."
-            )
+            window_trades.append(parsed)
+            row = TradeRow(**parsed)
+            trades.append(row)
+            if row.action == "BUY":
+                total_buys += row.amount
+            else:
+                total_sells += row.amount
 
     trades.sort(key=lambda t: t.trade_date, reverse=True)
 
-    # Trade-matched P/L: FIFO-match round-trips, mark open lots to current price.
-    # Needs current holdings (price + cost basis) to value open lots and to
-    # cost pre-window sells.
-    holdings: dict[str, dict] = {}
-    if account_ids:
-        position_results = await asyncio.gather(
-            *(fetch_account_positions_async(a) for a in account_ids),
-            return_exceptions=True,
+    debug_msg: str | None = None
+    if not trades and raw_order_count > 0:
+        top_states = sorted(
+            skipped_states.items(), key=lambda x: x[1], reverse=True
+        )[:3]
+        debug_msg = (
+            f"Stored {raw_order_count} orders, none matched window "
+            f"{window_start}–{window_end}. Skipped states: "
+            f"{', '.join(s or 'UNKNOWN' for s, _ in top_states) or 'none'}."
         )
-        for acct_id, result in zip(account_ids, position_results):
-            if isinstance(result, Exception):
-                logger.warning("Holdings fetch failed for %s: %s", acct_id, result)
-                continue
-            holdings.update(build_holdings_map(result))
+
+    # Trade-matched P/L: FIFO-match round-trips, mark open lots to current
+    # price using each account's cached holdings.
+    holdings: dict[str, dict] = {}
+    for account in accounts:
+        if account.holdings_cache:
+            holdings.update(build_holdings_map(account.holdings_cache))
 
     pnl = summarize_trades(window_trades, holdings)
     pnl_by_instrument = [InstrumentPnL(**row) for row in pnl["by_instrument"]]
     realized_pnl = pnl["realized_pnl"] if window_trades else None
     unrealized_pnl = pnl["unrealized_pnl"] if window_trades else None
     trading_pnl = pnl["trading_pnl"] if window_trades else None
-
-    # Compute window P/L using snapshots + deposits in the same window
-    window_start_dt = datetime.combine(
-        window_start, datetime.min.time(), tzinfo=timezone.utc
-    )
-    # End of the selected window (inclusive of the whole end day) — important
-    # for past weeks, so we don't grab today's value as the window-end value.
-    window_end_dt = datetime.combine(
-        window_end, datetime.max.time(), tzinfo=timezone.utc
-    )
     # Portfolio snapshots are stored per-user (not per-account), so the
     # snapshot-based portfolio P/L only applies to the all-accounts view.
     # When filtered to one account we leave it blank and rely on the
@@ -432,14 +454,16 @@ async def get_weekly_trades(
         if denom > 0:
             week_pnl_pct = round(week_pnl / denom, 6)
 
+    # We serve cached data; only a cold sync failure with nothing stored is a
+    # hard failure. A pending background refresh is surfaced via `stale`.
+    available = True
     message = debug_msg
-    if fetch_failed:
-        # Surface the actual exception so we can diagnose from the browser.
-        message = (
-            f"Could not fetch trade history from SnapTrade: {fetch_error_detail}"
-            if fetch_error_detail
-            else "Could not fetch trade history from SnapTrade."
-        )
+    if sync_error and not trades:
+        available = False
+        message = f"Couldn't reach SnapTrade and no cached trades yet: {sync_error}"
+
+    synced_times = [a.orders_synced_at for a in accounts if a.orders_synced_at]
+    last_synced_at = min(synced_times).isoformat() if synced_times else None
 
     return WeeklyReportResponse(
         week_start=window_start.isoformat(),
@@ -457,6 +481,8 @@ async def get_weekly_trades(
         unrealized_pnl=unrealized_pnl,
         trading_pnl=trading_pnl,
         pnl_by_instrument=pnl_by_instrument,
-        available=not fetch_failed,
+        available=available,
         message=message,
+        stale=bool(stale_account_ids),
+        last_synced_at=last_synced_at,
     )
