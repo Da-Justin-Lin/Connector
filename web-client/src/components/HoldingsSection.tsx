@@ -1,7 +1,9 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useRouter } from "next/navigation";
 
+import AnimatedNumber from "@/components/AnimatedNumber";
 import { useCachedResource } from "@/hooks/useCachedResource";
 
 interface Holding {
@@ -38,11 +40,19 @@ function fmt(n: number) {
   return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function StatCard({ label, value }: { label: string; value: string }) {
+function StatCard({
+  label,
+  value,
+  accent,
+}: {
+  label: string;
+  value: ReactNode;
+  accent?: boolean;
+}) {
   return (
-    <div className="card p-6">
-      <p className="text-sm text-muted">{label}</p>
-      <p className="mt-1 text-3xl font-bold text-content">{value}</p>
+    <div className={`card card-hover p-6 ${accent ? "shadow-glow" : ""}`}>
+      <p className="text-xs font-medium uppercase tracking-wide text-muted">{label}</p>
+      <p className="num mt-1 text-3xl font-bold tracking-tight text-content">{value}</p>
     </div>
   );
 }
@@ -69,15 +79,15 @@ function AccountCard({
         <div className="flex gap-6 text-right text-sm">
           <div>
             <p className="text-xs text-muted">Cash</p>
-            <p className="font-medium text-content">${fmt(section.cash)}</p>
+            <p className="num font-medium text-content">${fmt(section.cash)}</p>
           </div>
           <div>
             <p className="text-xs text-muted">Holdings</p>
-            <p className="font-medium text-content">${fmt(section.holdings_value)}</p>
+            <p className="num font-medium text-content">${fmt(section.holdings_value)}</p>
           </div>
           <div>
             <p className="text-xs text-muted">Total</p>
-            <p className="font-semibold text-content">${fmt(section.total_value)}</p>
+            <p className="num font-semibold text-content">${fmt(section.total_value)}</p>
           </div>
         </div>
       </div>
@@ -119,10 +129,10 @@ function AccountCard({
                     </td>
                     <td className="px-4 py-3 text-content">{h.name ?? "—"}</td>
                     <td className="px-4 py-3 capitalize text-muted">{h.security_type || "—"}</td>
-                    <td className="px-4 py-3 text-content">{h.quantity.toFixed(4)}</td>
-                    <td className="px-4 py-3 text-content">${h.institution_price.toFixed(2)}</td>
-                    <td className="px-4 py-3 font-medium text-content">${fmt(h.market_value)}</td>
-                    <td className="px-4 py-3 text-content">
+                    <td className="num px-4 py-3 text-content">{h.quantity.toFixed(4)}</td>
+                    <td className="num px-4 py-3 text-content">${h.institution_price.toFixed(2)}</td>
+                    <td className="num px-4 py-3 font-medium text-content">${fmt(h.market_value)}</td>
+                    <td className="num px-4 py-3 text-content">
                       {h.cost_basis != null ? `$${fmt(h.cost_basis)}` : "—"}
                     </td>
                   </tr>
@@ -154,16 +164,33 @@ export default function HoldingsSection({ accountId = null }: HoldingsSectionPro
     { isStale: (d) => !!d.stale },
   );
 
-  const totalValue = data ? `$${fmt(data.total_value)}` : "—";
-  const totalCash = data ? `$${fmt(data.total_cash)}` : "—";
   const connectedAccounts = data ? String(data.connected_accounts) : "—";
   const updating = (revalidating || data?.stale) && data;
 
   return (
     <>
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-        <StatCard label="Total Portfolio Value" value={loading ? "…" : totalValue} />
-        <StatCard label="Total Cash" value={loading ? "…" : totalCash} />
+        <StatCard
+          label="Total Portfolio Value"
+          accent
+          value={
+            loading || !data ? (
+              "…"
+            ) : (
+              <AnimatedNumber value={data.total_value} prefix="$" sensitive />
+            )
+          }
+        />
+        <StatCard
+          label="Total Cash"
+          value={
+            loading || !data ? (
+              "…"
+            ) : (
+              <AnimatedNumber value={data.total_cash} prefix="$" sensitive />
+            )
+          }
+        />
         <StatCard label="Connected Accounts" value={loading ? "…" : connectedAccounts} />
       </div>
 

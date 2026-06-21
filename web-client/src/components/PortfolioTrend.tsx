@@ -2,17 +2,20 @@
 
 import { useMemo, useState } from "react";
 import {
+  Area,
   CartesianGrid,
+  ComposedChart,
   Legend,
   Line,
-  LineChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
 
+import AnimatedNumber from "@/components/AnimatedNumber";
 import { useCachedResource } from "@/hooks/useCachedResource";
+import { useThemeColors } from "@/hooks/useThemeColors";
 
 type Range = "1D" | "1M" | "3M" | "6M" | "YTD" | "1Y";
 
@@ -138,9 +141,9 @@ function ReturnCard({
     tone === "up" ? "text-up" : tone === "down" ? "text-down" : "text-content";
   return (
     <div className="card card-hover p-4">
-      <p className="text-xs text-muted">{label}</p>
-      <p className={`mt-1 text-xl font-bold ${valueColor}`}>{fmtPct(pct)}</p>
-      <p className="text-xs text-muted">{fmtMoney(delta)}</p>
+      <p className="text-xs font-medium uppercase tracking-wide text-muted">{label}</p>
+      <p className={`num mt-1 text-xl font-bold ${valueColor}`}>{fmtPct(pct)}</p>
+      <p className="num text-xs text-muted">{fmtMoney(delta)}</p>
     </div>
   );
 }
@@ -222,6 +225,7 @@ interface PortfolioTrendProps {
 
 export default function PortfolioTrend({ accountId = null }: PortfolioTrendProps) {
   const [range, setRange] = useState<Range>("1Y");
+  const c = useThemeColors();
   const rangeQuery = RANGES.find((r) => r.label === range)?.query || "1y";
   const acct = accountId ?? "ALL";
   const acctQs = accountId ? `&account_id=${accountId}` : "";
@@ -339,12 +343,12 @@ export default function PortfolioTrend({ accountId = null }: PortfolioTrendProps
   const ytdTone =
     returns?.ytd_change == null ? "default" : returns.ytd_change >= 0 ? "up" : "down";
 
-  const currentValueDisplay =
+  const currentValueNum =
     displayedData.length > 0
-      ? `$${fmt(displayedData[displayedData.length - 1].value)}`
+      ? displayedData[displayedData.length - 1].value
       : returns
-        ? `$${fmt(returns.current_value)}`
-        : "—";
+        ? returns.current_value
+        : null;
 
   return (
     <div className="flex flex-col gap-6">
@@ -392,14 +396,23 @@ export default function PortfolioTrend({ accountId = null }: PortfolioTrendProps
                 </span>
               )}
             </p>
-            <p className="mt-1 text-2xl font-bold text-content">{currentValueDisplay}</p>
+            {currentValueNum != null ? (
+              <AnimatedNumber
+                value={currentValueNum}
+                prefix="$"
+                sensitive
+                className="mt-1 block text-3xl font-bold tracking-tight text-content"
+              />
+            ) : (
+              <p className="num mt-1 text-3xl font-bold tracking-tight text-content">—</p>
+            )}
           </div>
           <div className="flex gap-1 rounded-lg bg-surface-2 p-1">
             {RANGES.map((r) => (
               <button
                 key={r.label}
                 onClick={() => setRange(r.label)}
-                className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+                className={`tap rounded-md px-3 py-1 text-xs font-medium transition-colors ${
                   range === r.label
                     ? "bg-surface text-content shadow-sm"
                     : "text-muted hover:text-content"
@@ -426,47 +439,58 @@ export default function PortfolioTrend({ accountId = null }: PortfolioTrendProps
             </div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={displayedData} margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
+              <ComposedChart
+                data={displayedData}
+                margin={{ top: 8, right: 8, left: 8, bottom: 8 }}
+                className="chart-glow"
+              >
+                <defs>
+                  <linearGradient id="portfolioFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={c.brand} stopOpacity={0.32} />
+                    <stop offset="100%" stopColor={c.brand} stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                {/* Just a few faint dotted horizontals — no vertical clutter. */}
+                <CartesianGrid vertical={false} strokeDasharray="2 6" />
                 <XAxis
                   dataKey="date"
-                  tick={{ fontSize: 11, fill: "#9ca3af" }}
+                  tick={{ fontSize: 11, fill: c.faint }}
                   tickLine={false}
                   axisLine={false}
                   minTickGap={32}
                   tickFormatter={(v: string) => formatXTick(v, range === "1D")}
                 />
                 <YAxis
-                  tick={{ fontSize: 11, fill: "#9ca3af" }}
+                  tick={{ fontSize: 11, fill: c.faint }}
                   tickLine={false}
                   axisLine={false}
                   tickFormatter={(v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`}
                   width={56}
                 />
-                <Tooltip
-                  content={<CustomTooltip isIntraday={range === "1D"} />}
-                />
-                <Legend wrapperStyle={{ fontSize: 12 }} iconType="line" />
-                <Line
+                <Tooltip content={<CustomTooltip isIntraday={range === "1D"} />} />
+                <Legend wrapperStyle={{ fontSize: 12 }} iconType="plainline" />
+                <Area
                   type="monotone"
                   dataKey="portfolioPct"
                   name="Portfolio"
-                  stroke="#4f46e5"
-                  strokeWidth={2}
+                  stroke={c.brand}
+                  strokeWidth={2.5}
+                  fill="url(#portfolioFill)"
                   dot={false}
+                  activeDot={{ r: 4, strokeWidth: 0, fill: c.brand }}
                   connectNulls
                 />
                 <Line
                   type="monotone"
                   dataKey="benchmarkPct"
                   name="S&P 500"
-                  stroke="#9ca3af"
-                  strokeWidth={2}
+                  stroke={c.faint}
+                  strokeWidth={1.75}
                   strokeDasharray="4 4"
                   dot={false}
                   connectNulls
                 />
-              </LineChart>
+              </ComposedChart>
             </ResponsiveContainer>
           )}
         </div>

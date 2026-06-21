@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 
+import AnimatedNumber from "@/components/AnimatedNumber";
 import api from "@/services/api";
 import { useCachedResource } from "@/hooks/useCachedResource";
 
@@ -226,8 +227,13 @@ export default function AllocationBreakdown({ accountId = null }: { accountId?: 
               </PieChart>
             </ResponsiveContainer>
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-              <span className="text-xs text-muted">Total</span>
-              <span className="text-lg font-bold text-content">${fmt(total)}</span>
+              <span className="text-xs uppercase tracking-wide text-muted">Total</span>
+              <AnimatedNumber
+                value={total}
+                prefix="$"
+                sensitive
+                className="text-lg font-bold text-content"
+              />
             </div>
           </div>
 
@@ -242,14 +248,14 @@ export default function AllocationBreakdown({ accountId = null }: { accountId?: 
                     <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: s.color }} />
                     <span className="truncate text-content">{s.label}</span>
                   </span>
-                  <span className="shrink-0 text-muted">
+                  <span className="num shrink-0 text-muted">
                     {((s.value / total) * 100).toFixed(1)}%
                   </span>
                 </li>
               ))}
             </ul>
             {concentration && (
-              <p className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-700">
+              <p className="mt-3 rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
                 ⚠ {concentration.ticker} is {(concentration.pct * 100).toFixed(0)}% of your
                 portfolio — heavily concentrated.
               </p>
