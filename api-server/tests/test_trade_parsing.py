@@ -178,14 +178,31 @@ def test_parse_order_sets_instrument_key():
     assert parse_order(OPTION_ORDER)["instrument_key"] == "AAPL260116C00200000"
 
 
+def test_parse_order_captures_timestamp_and_effect():
+    eq = parse_order(EQUITY_ORDER)
+    assert eq["executed_at"] == "2026-06-18T14:30:00Z"
+    assert eq["effect"] is None  # plain BUY has no open/close intent
+
+    op = parse_order(OPTION_ORDER)
+    assert op["executed_at"] == "2026-06-19T15:45:00Z"
+    assert op["effect"] == "OPEN"  # BUY_TO_OPEN
+
+    assert parse_order(OPTION_ORDER_NESTED_RAW)["effect"] == "CLOSE"  # SELL_TO_CLOSE
+
+
 # --- summarize_trades: realized round-trips --------------------------------
 
-def _trade(key, action, units, price, asset_type="EQUITY", day="2026-06-18"):
+def _trade(
+    key, action, units, price, asset_type="EQUITY", day="2026-06-18",
+    ts=None, effect=None,
+):
     return {
         "trade_date": day,
+        "executed_at": ts or f"{day}T12:00:00Z",
         "symbol": key,
         "description": None,
         "action": action,
+        "effect": effect,
         "units": units,
         "price": price,
         "asset_type": asset_type,
@@ -211,6 +228,36 @@ def test_option_round_trip_applies_multiplier():
     ]
     out = summarize_trades(trades)
     assert out["realized_pnl"] == 400.0  # 2 * (5 - 3) * 100
+
+
+def test_same_day_option_daytrade_matches_regardless_of_input_order():
+    # SnapTrade returns newest-first, so the closing SELL is listed before the
+    # opening BUY even though it executed later. Time-ordering must still match
+    # them into a realized round-trip (the bug this fixes).
+    key = "AAPL260116C00200000"
+    trades = [
+        _trade(key, "SELL", 2, 5.0, "OPTION", ts="2026-06-18T15:30:00Z", effect="CLOSE"),
+        _trade(key, "BUY", 2, 3.0, "OPTION", ts="2026-06-18T09:30:00Z", effect="OPEN"),
+    ]
+    out = summarize_trades(trades)
+    inst = out["by_instrument"][0]
+    assert inst["status"] == "closed"
+    assert inst["needs_basis"] is False
+    assert out["realized_pnl"] == 400.0  # 2 * (5 - 3) * 100
+    assert out["unrealized_pnl"] == 0.0
+
+
+def test_short_option_daytrade_sell_to_open_then_buy_to_close():
+    # Sold premium to open, bought back cheaper to close — realized gain.
+    key = "TSLA260320P00150000"
+    trades = [
+        _trade(key, "SELL", 1, 4.0, "OPTION", ts="2026-06-18T09:30:00Z", effect="OPEN"),
+        _trade(key, "BUY", 1, 1.5, "OPTION", ts="2026-06-18T15:30:00Z", effect="CLOSE"),
+    ]
+    out = summarize_trades(trades)
+    inst = out["by_instrument"][0]
+    assert inst["status"] == "closed"
+    assert out["realized_pnl"] == 250.0  # (4 - 1.5) * 1 * 100
 
 
 def test_open_position_marked_to_current_price():

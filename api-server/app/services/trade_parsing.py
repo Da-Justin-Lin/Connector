@@ -137,8 +137,8 @@ def classify_order_action(order: dict) -> str | None:
     return None
 
 
-def order_executed_date(order: dict) -> str | None:
-    """Best-effort YYYY-MM-DD date an order was executed/placed."""
+def order_executed_timestamp(order: dict) -> str | None:
+    """Best-effort full execution/placement timestamp, as a sortable string."""
     for key in (
         "time_executed",
         "executed_at",
@@ -148,7 +148,27 @@ def order_executed_date(order: dict) -> str | None:
     ):
         value = order.get(key)
         if value:
-            return str(value)[:10]
+            return str(value)
+    return None
+
+
+def order_executed_date(order: dict) -> str | None:
+    """Best-effort YYYY-MM-DD date an order was executed/placed."""
+    ts = order_executed_timestamp(order)
+    return ts[:10] if ts else None
+
+
+def order_effect(order: dict) -> str | None:
+    """Open/close intent of an order, when the broker reports it.
+
+    Option orders carry it in the action (BUY_TO_OPEN / SELL_TO_CLOSE / ...);
+    plain equity BUY/SELL has no effect.
+    """
+    raw = str(order.get("action") or order.get("side") or "").upper()
+    if "OPEN" in raw:
+        return "OPEN"
+    if "CLOSE" in raw:
+        return "CLOSE"
     return None
 
 
@@ -162,9 +182,10 @@ def parse_order(order: dict) -> dict | None:
     if not isinstance(order, dict):
         return None
 
-    executed_date_str = order_executed_date(order)
-    if not executed_date_str:
+    executed_at = order_executed_timestamp(order)
+    if not executed_at:
         return None
+    executed_date_str = executed_at[:10]
 
     action = classify_order_action(order)
     if action is None:
@@ -203,9 +224,11 @@ def parse_order(order: dict) -> dict | None:
 
     return {
         "trade_date": executed_date_str,
+        "executed_at": executed_at,
         "symbol": symbol,
         "description": description,
         "action": action,
+        "effect": order_effect(order),
         "units": units,
         "price": price,
         "amount": amount,
@@ -269,15 +292,44 @@ def build_holdings_map(positions_payload) -> dict[str, dict]:
     return out
 
 
+def _is_opening(trade: dict) -> bool:
+    """Whether a fill opens a position (vs closes one).
+
+    Uses the broker's explicit open/close effect when present; otherwise a
+    BUY is treated as opening and a SELL as closing (long-biased default that
+    matches typical equity activity).
+    """
+    effect = trade.get("effect")
+    if effect == "OPEN":
+        return True
+    if effect == "CLOSE":
+        return False
+    return trade["action"] == "BUY"
+
+
+def _trade_sort_key(trade: dict) -> tuple:
+    # Order by execution time; on ties, opens before closes so a same-instant
+    # round trip still matches.
+    return (
+        trade.get("executed_at") or trade.get("trade_date") or "",
+        0 if _is_opening(trade) else 1,
+    )
+
+
 def summarize_trades(
     trades: list[dict], holdings: dict[str, dict] | None = None
 ) -> dict:
-    """FIFO-match window trades into realized + unrealized P/L.
+    """Match window trades into realized + unrealized P/L.
 
-    * Round-trips fully inside the window -> realized P/L from matched lots.
-    * Open lots (bought in window, still held) -> unrealized vs current price.
-    * Sells with no in-window buy (closed a pre-window position) -> realized
-      against SnapTrade cost basis when available, else flagged `needs_basis`.
+    Fills are processed in execution-time order. A signed FIFO inventory lets
+    same-day round trips (including short option trades opened by selling)
+    match regardless of the order SnapTrade returns them in:
+
+    * Round-trips inside the window -> realized P/L from matched lots.
+    * Open lots still held at window end -> unrealized vs current price
+      (long: price-cost; short: cost-price).
+    * Closes with no in-window opening fill (closed a pre-window position) ->
+      realized against SnapTrade cost basis when available, else `needs_basis`.
 
     `holdings` maps instrument_key -> {price, cost_per_share} (per share).
     Returns totals plus a per-instrument breakdown.
@@ -295,68 +347,79 @@ def summarize_trades(
     total_unrealized = 0.0
 
     for key, items in groups.items():
-        items_sorted = sorted(items, key=lambda x: x["trade_date"])
+        items_sorted = sorted(items, key=_trade_sort_key)
         mult = (
             OPTION_CONTRACT_MULTIPLIER
             if items_sorted[0]["asset_type"] == "OPTION"
             else 1
         )
-        open_lots: deque[list[float]] = deque()  # [qty_remaining, price]
-        realized = 0.0
-        buy_units = sell_units = 0.0
-        unmatched_sell_units = unmatched_sell_proceeds = 0.0
-
-        for t in items_sorted:
-            q = _to_float(t.get("units")) or 0.0
-            p = _to_float(t.get("price")) or 0.0
-            if t["action"] == "BUY":
-                buy_units += q
-                open_lots.append([q, p])
-            else:
-                sell_units += q
-                remaining = q
-                while remaining > _QTY_EPS and open_lots:
-                    lot = open_lots[0]
-                    matched = min(remaining, lot[0])
-                    realized += (p - lot[1]) * matched * mult
-                    lot[0] -= matched
-                    remaining -= matched
-                    if lot[0] <= _QTY_EPS:
-                        open_lots.popleft()
-                if remaining > _QTY_EPS:
-                    unmatched_sell_units += remaining
-                    unmatched_sell_proceeds += remaining * p * mult
-
         holding = holdings.get(key) or {}
         current_price = holding.get("price")
         cost_per_share = holding.get("cost_per_share")
 
-        # Pre-window sells: realize against SnapTrade cost basis if we have it.
+        # Lots carry a signed qty: positive = long, negative = short. At any
+        # time all open lots share one sign (the current position side).
+        position: deque[list[float]] = deque()  # [signed_qty, price]
+        realized = 0.0
+        buy_units = sell_units = 0.0
         needs_basis = False
-        if unmatched_sell_units > _QTY_EPS:
-            if cost_per_share is not None:
-                realized += (
-                    unmatched_sell_proceeds
-                    - cost_per_share * unmatched_sell_units * mult
-                )
-            else:
-                needs_basis = True
 
-        # Open lots still held: mark to current price.
-        net_units = sum(lot[0] for lot in open_lots)
+        for t in items_sorted:
+            is_buy = t["action"] == "BUY"
+            q = _to_float(t.get("units")) or 0.0
+            p = _to_float(t.get("price")) or 0.0
+            if is_buy:
+                buy_units += q
+            else:
+                sell_units += q
+
+            remaining = q
+            # Close opposing lots first (buy closes shorts; sell closes longs).
+            while remaining > _QTY_EPS and position and (position[0][0] > 0) == (not is_buy):
+                lot = position[0]
+                matched = min(remaining, abs(lot[0]))
+                if lot[0] > 0:          # closing a long by selling
+                    realized += (p - lot[1]) * matched * mult
+                    lot[0] -= matched
+                else:                   # closing a short by buying
+                    realized += (lot[1] - p) * matched * mult
+                    lot[0] += matched
+                remaining -= matched
+                if abs(lot[0]) <= _QTY_EPS:
+                    position.popleft()
+
+            if remaining > _QTY_EPS:
+                if _is_opening(t):
+                    position.append([(remaining if is_buy else -remaining), p])
+                elif cost_per_share is not None:
+                    # Closed a position opened before the window.
+                    realized += (
+                        (p - cost_per_share) if not is_buy
+                        else (cost_per_share - p)
+                    ) * remaining * mult
+                else:
+                    needs_basis = True
+
+        # Remaining open lots: mark to current price.
+        net_units = sum(lot[0] for lot in position)
         unrealized = 0.0
         needs_price = False
-        if net_units > _QTY_EPS:
+        if abs(net_units) > _QTY_EPS:
             if current_price is not None:
-                for lot in open_lots:
-                    unrealized += (current_price - lot[1]) * lot[0] * mult
+                for lot in position:
+                    if lot[0] > 0:
+                        unrealized += (current_price - lot[1]) * lot[0] * mult
+                    else:
+                        unrealized += (lot[1] - current_price) * (-lot[0]) * mult
             else:
                 needs_price = True
 
-        if net_units > _QTY_EPS:
-            status = "open" if sell_units <= _QTY_EPS else "partial"
-        else:
+        if abs(net_units) <= _QTY_EPS:
             status = "closed"
+        elif buy_units > _QTY_EPS and sell_units > _QTY_EPS:
+            status = "partial"
+        else:
+            status = "open"
 
         total_realized += realized
         total_unrealized += unrealized
