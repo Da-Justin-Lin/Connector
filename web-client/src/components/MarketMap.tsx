@@ -27,16 +27,17 @@ interface MarketMapResponse {
 
 const POLL_MS = 120_000;
 
-// Diverging color: dark slate at 0%, toward green (up) / red (down), capped ±3%.
+// Diverging color: muted slate at 0%, easing toward green (up) / red (down),
+// capped at ±3%. A gamma curve keeps small moves from washing out to a flat blob.
 function carpetColor(pct: number | null | undefined) {
-  if (pct == null) return "#374151";
+  if (pct == null) return "#334155"; // slate-700
   const cap = 0.03;
   const t = Math.max(-1, Math.min(1, pct / cap));
-  const neutral = [31, 41, 55]; // slate-800
-  const green = [22, 163, 74];
-  const red = [220, 38, 38];
+  const neutral = [51, 65, 85]; // slate-700
+  const green = [34, 197, 94]; // emerald-500
+  const red = [244, 63, 94]; // rose-500
   const target = t >= 0 ? green : red;
-  const k = Math.abs(t);
+  const k = Math.pow(Math.abs(t), 0.7);
   const c = neutral.map((n, i) => Math.round(n + (target[i] - n) * k));
   return `rgb(${c[0]},${c[1]},${c[2]})`;
 }
@@ -71,12 +72,17 @@ function Cell(props: CellProps) {
   const { depth = 0, x = 0, y = 0, width = 0, height = 0, symbol, change_pct, onSelect } = props;
 
   if (depth === 1) {
-    return <rect x={x} y={y} width={width} height={height} fill="none" stroke="#0b0f17" strokeWidth={2} />;
+    return <rect x={x} y={y} width={width} height={height} fill="none" stroke="#0b0f17" strokeWidth={3} rx={3} />;
   }
   if (depth !== 2 || width <= 0 || height <= 0) return null;
 
   const showLabel = width > 34 && height > 20;
-  const fontSize = Math.max(9, Math.min(14, Math.round(width / 5)));
+  // Size the ticker off the smaller dimension so it never overflows the cell.
+  const fontSize = Math.max(9, Math.min(15, Math.round(Math.min(width / 4.5, height / 2.6))));
+  const showPct = height > 38 && width > 40;
+  // Soft drop shadow keeps the white text readable on any cell color without a
+  // hard outline stroke.
+  const textShadow = "0 1px 2px rgba(0,0,0,0.55)";
 
   return (
     <g
@@ -84,33 +90,38 @@ function Cell(props: CellProps) {
       onClick={() => symbol && onSelect?.(symbol)}
     >
       <rect
-        x={x}
-        y={y}
-        width={width}
-        height={height}
+        x={x + 0.5}
+        y={y + 0.5}
+        width={Math.max(0, width - 1)}
+        height={Math.max(0, height - 1)}
         fill={carpetColor(change_pct)}
-        stroke="#0b0f17"
+        stroke="rgba(11,15,23,0.85)"
         strokeWidth={1}
+        rx={2}
       />
       {showLabel && (
         <>
           <text
             x={x + width / 2}
-            y={y + height / 2 - 2}
+            y={y + height / 2 + (showPct ? -2 : fontSize / 3)}
             textAnchor="middle"
             fill="#ffffff"
             fontSize={fontSize}
-            fontWeight={600}
+            fontWeight={700}
+            letterSpacing={0.3}
+            style={{ textShadow, pointerEvents: "none" }}
           >
             {symbol}
           </text>
-          {height > 34 && (
+          {showPct && (
             <text
               x={x + width / 2}
-              y={y + height / 2 + fontSize - 2}
+              y={y + height / 2 + fontSize}
               textAnchor="middle"
-              fill="rgba(255,255,255,0.85)"
+              fill="rgba(255,255,255,0.92)"
               fontSize={Math.max(8, fontSize - 3)}
+              fontWeight={500}
+              style={{ textShadow, pointerEvents: "none" }}
             >
               {fmtPct(change_pct)}
             </text>
@@ -203,7 +214,7 @@ export default function MarketMap() {
         <div className="flex items-center gap-2 text-[10px] text-gray-500">
           <span>−3%</span>
           <span className="h-2 w-32 rounded-full" style={{
-            background: "linear-gradient(to right, #dc2626, #1f2937, #16a34a)",
+            background: "linear-gradient(to right, #f43f5e, #334155, #22c55e)",
           }} />
           <span>+3%</span>
         </div>
