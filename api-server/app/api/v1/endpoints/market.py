@@ -7,9 +7,12 @@ from app.models.user import User
 from app.schemas.market_data import (
     Candle,
     CandlesResponse,
+    CryptoFearGreedResponse,
     EarningsEvent,
     EarningsResponse,
     FearGreedResponse,
+    Quote,
+    QuotesResponse,
     SectorsResponse,
     Snapshot,
     SnapshotsResponse,
@@ -17,8 +20,10 @@ from app.schemas.market_data import (
 from app.services.market_data_service import (
     CandleRange,
     fetch_candles,
+    fetch_crypto_fear_greed,
     fetch_earnings,
     fetch_fear_greed,
+    fetch_quotes,
     fetch_sectors,
     fetch_snapshots,
     is_configured,
@@ -30,8 +35,19 @@ router = APIRouter()
 
 _ALLOWED_RANGES: tuple[CandleRange, ...] = ("1D", "1W", "1M", "3M", "1Y")
 
-# Symbols offered on the macro tab; capped to keep upstream fan-out small.
+# Symbols with intraday day charts on the macro tab; capped to keep fan-out small.
 _MACRO_SYMBOLS = ("SPY", "QQQ", "DIA", "IWM", "BTC-USD", "ETH-USD", "GLD", "^VIX")
+
+# Symbols offered through the lightweight (no-candle) /quotes endpoint:
+# Treasury yields, the 11 S&P sectors, and commodities + the dollar index.
+_YIELD_SYMBOLS = ("^IRX", "^FVX", "^TNX", "^TYX")
+_SECTOR_ETFS = (
+    "XLK", "XLF", "XLE", "XLV", "XLY", "XLP", "XLI", "XLB", "XLU", "XLRE", "XLC",
+)
+_COMMODITY_SYMBOLS = ("CL=F", "NG=F", "GC=F", "SI=F", "HG=F", "DX=F")
+_QUOTE_ALLOWED = frozenset(
+    _MACRO_SYMBOLS + _YIELD_SYMBOLS + _SECTOR_ETFS + _COMMODITY_SYMBOLS
+)
 
 
 @router.get("/candles", response_model=CandlesResponse)
@@ -133,6 +149,54 @@ async def get_fear_greed(_: User = Depends(get_current_user)):
         prev_week=data.get("prev_week"),
         prev_month=data.get("prev_month"),
         prev_year=data.get("prev_year"),
+        available=True,
+    )
+
+
+@router.get("/quotes", response_model=QuotesResponse)
+async def get_quotes(
+    symbols: str = Query(..., max_length=400),
+    _: User = Depends(get_current_user),
+):
+    """Last price + day change for a batch of symbols (no intraday candles).
+
+    Backs the rates, sector, and commodity strips on the macro tab.
+    """
+    requested = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    seen: set[str] = set()
+    wanted: list[str] = []
+    for s in requested:
+        if s in _QUOTE_ALLOWED and s not in seen:
+            seen.add(s)
+            wanted.append(s)
+
+    if not wanted:
+        return QuotesResponse(quotes=[], available=True, message=None)
+
+    try:
+        raw = await fetch_quotes(wanted)
+    except Exception as exc:
+        logger.warning("Quotes fetch failed: %s", exc)
+        return QuotesResponse(
+            quotes=[],
+            available=False,
+            message="Failed to fetch market data right now. Try again in a minute.",
+        )
+
+    return QuotesResponse(quotes=[Quote(**q) for q in raw], available=True)
+
+
+@router.get("/crypto-fear-greed", response_model=CryptoFearGreedResponse)
+async def get_crypto_fear_greed(_: User = Depends(get_current_user)):
+    data = await fetch_crypto_fear_greed()
+    if not data:
+        return CryptoFearGreedResponse(
+            available=False, message="Crypto Fear & Greed index is unavailable right now."
+        )
+    return CryptoFearGreedResponse(
+        score=data.get("score"),
+        rating=data.get("rating"),
+        prev_close=data.get("prev_close"),
         available=True,
     )
 

@@ -140,6 +140,73 @@ async def fetch_snapshots(symbols: list[str]) -> list[dict]:
 
 
 # --------------------------------------------------------------------------- #
+# Lightweight batched quotes (last price + day change, no intraday candles)
+# --------------------------------------------------------------------------- #
+
+
+def _quotes_sync(symbols: list[str]) -> list[dict]:
+    """Last close + change vs. prior close for many symbols in one batched call.
+
+    Uses a single yfinance download (daily bars) instead of one request per
+    symbol, so a strip of ~20 tickers stays cheap. No intraday candles.
+    """
+    if not symbols:
+        return []
+
+    df = yf.download(
+        symbols,
+        period="5d",
+        interval="1d",
+        progress=False,
+        threads=True,
+        auto_adjust=False,
+    )
+    if df is None or df.empty:
+        return []
+
+    # Multi-symbol downloads have a (field, ticker) column MultiIndex.
+    closes = df["Close"] if "Close" in df.columns.get_level_values(0) else df
+
+    out: list[dict] = []
+    for sym in symbols:
+        try:
+            series = closes[sym].dropna() if sym in closes else None
+        except (KeyError, TypeError):
+            series = None
+        if series is None or len(series) == 0:
+            out.append(
+                {
+                    "symbol": sym.upper(),
+                    "last": None,
+                    "previous_close": None,
+                    "change": None,
+                    "change_pct": None,
+                }
+            )
+            continue
+
+        last = float(series.iloc[-1])
+        prev = float(series.iloc[-2]) if len(series) >= 2 else None
+        change = last - prev if prev is not None else None
+        change_pct = (change / prev) if (change is not None and prev) else None
+        out.append(
+            {
+                "symbol": sym.upper(),
+                "last": round(last, 4),
+                "previous_close": round(prev, 4) if prev is not None else None,
+                "change": round(change, 4) if change is not None else None,
+                "change_pct": change_pct,
+            }
+        )
+    return out
+
+
+async def fetch_quotes(symbols: list[str]) -> list[dict]:
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, partial(_quotes_sync, symbols))
+
+
+# --------------------------------------------------------------------------- #
 # Sector enrichment for the allocation breakdown
 # --------------------------------------------------------------------------- #
 
@@ -247,6 +314,52 @@ async def fetch_fear_greed() -> dict | None:
     }
     _FG_CACHE["data"] = data
     _FG_CACHE["at"] = now
+    return data
+
+
+# --------------------------------------------------------------------------- #
+# Crypto Fear & Greed index (alternative.me — free, no API key)
+# --------------------------------------------------------------------------- #
+
+_CRYPTO_FG_URL = "https://api.alternative.me/fng/?limit=4"
+_CFG_CACHE: dict[str, object] = {"data": None, "at": 0.0}
+_CFG_TTL = 300  # seconds
+
+
+async def fetch_crypto_fear_greed() -> dict | None:
+    now = time.time()
+    cached = _CFG_CACHE.get("data")
+    if cached is not None and now - float(_CFG_CACHE["at"]) < _CFG_TTL:  # type: ignore[arg-type]
+        return cached  # type: ignore[return-value]
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(_CRYPTO_FG_URL)
+            resp.raise_for_status()
+            payload = resp.json()
+    except Exception as exc:
+        logger.warning("Crypto Fear & Greed fetch failed: %s", exc)
+        return cached  # type: ignore[return-value]
+
+    rows = payload.get("data") or []
+    if not rows:
+        return cached  # type: ignore[return-value]
+
+    def _score(node) -> float | None:
+        try:
+            return round(float(node["value"]), 1)
+        except (TypeError, ValueError, KeyError):
+            return None
+
+    data = {
+        "score": _score(rows[0]),
+        "rating": rows[0].get("value_classification"),
+        # The feed returns one entry per day; index 1 ≈ yesterday, etc.
+        "prev_close": _score(rows[1]) if len(rows) > 1 else None,
+        "prev_week": None,  # daily feed, capped at limit=4
+    }
+    _CFG_CACHE["data"] = data
+    _CFG_CACHE["at"] = now
     return data
 
 
