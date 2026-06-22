@@ -13,9 +13,27 @@ import { useEffect, useRef, useState } from "react";
 import { useThemeColors } from "@/hooks/useThemeColors";
 import api from "@/services/api";
 
-export type Range = "1D" | "1W" | "1M" | "3M" | "1Y";
+export type Range = "1D" | "1W" | "1M" | "3M" | "1Y" | "5Y" | "MAX";
 
-const RANGES: Range[] = ["1D", "1W", "1M", "3M", "1Y"];
+const RANGES: Range[] = ["1D", "1W", "1M", "3M", "1Y", "5Y", "MAX"];
+
+type IntervalChoice = "AUTO" | "30M" | "1D" | "1W";
+
+const INTERVAL_OPTIONS: { value: IntervalChoice; label: string }[] = [
+  { value: "AUTO", label: "Auto" },
+  { value: "30M", label: "30 min" },
+  { value: "1D", label: "Daily" },
+  { value: "1W", label: "Weekly" },
+];
+
+// yfinance interval string (from the response) -> friendly label.
+const INTERVAL_LABEL: Record<string, string> = {
+  "5m": "5-min",
+  "30m": "30-min",
+  "1h": "hourly",
+  "1d": "daily",
+  "1wk": "weekly",
+};
 
 // How often to silently re-fetch in the background (ms)
 const POLL_INTERVAL: Record<Range, number> = {
@@ -24,6 +42,8 @@ const POLL_INTERVAL: Record<Range, number> = {
   "1M": 5 * 60_000,
   "3M": 5 * 60_000,
   "1Y": 5 * 60_000,
+  "5Y": 5 * 60_000,
+  "MAX": 5 * 60_000,
 };
 
 interface Candle {
@@ -41,6 +61,7 @@ interface CandlesResponse {
   candles: Candle[];
   available: boolean;
   message: string | null;
+  interval?: string | null;
 }
 
 interface PriceChartProps {
@@ -52,6 +73,7 @@ interface PriceChartProps {
 
 export default function PriceChart({ symbol, initialRange = "1M", onLatest }: PriceChartProps) {
   const [range, setRange] = useState<Range>(initialRange);
+  const [intervalChoice, setIntervalChoice] = useState<IntervalChoice>("AUTO");
   const [data, setData] = useState<CandlesResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const c = useThemeColors();
@@ -67,12 +89,16 @@ export default function PriceChart({ symbol, initialRange = "1M", onLatest }: Pr
     onLatestRef.current?.(close, new Date());
   };
 
+  const candlesUrl = `/api/v1/market/candles?symbol=${encodeURIComponent(
+    symbol,
+  )}&range=${range}&interval=${intervalChoice}`;
+
   // Initial fetch (shows loading spinner)
   useEffect(() => {
     setLoading(true);
     setData(null);
     api
-      .get<CandlesResponse>(`/api/v1/market/candles?symbol=${encodeURIComponent(symbol)}&range=${range}`)
+      .get<CandlesResponse>(candlesUrl)
       .then(({ data }) => {
         setData(data);
         emitLatest(data);
@@ -81,13 +107,13 @@ export default function PriceChart({ symbol, initialRange = "1M", onLatest }: Pr
         setData({ symbol, range, candles: [], available: false, message: "Failed to load market data." }),
       )
       .finally(() => setLoading(false));
-  }, [symbol, range]);
+  }, [symbol, range, intervalChoice]);
 
   // Background polling — silently refreshes without touching loading state
   useEffect(() => {
     const id = setInterval(() => {
       api
-        .get<CandlesResponse>(`/api/v1/market/candles?symbol=${encodeURIComponent(symbol)}&range=${range}`)
+        .get<CandlesResponse>(candlesUrl)
         .then(({ data }) => {
           setData(data);
           emitLatest(data);
@@ -95,7 +121,7 @@ export default function PriceChart({ symbol, initialRange = "1M", onLatest }: Pr
         .catch(() => {});
     }, POLL_INTERVAL[range]);
     return () => clearInterval(id);
-  }, [symbol, range]);
+  }, [symbol, range, intervalChoice]);
 
   // Create chart once
   useEffect(() => {
@@ -163,7 +189,23 @@ export default function PriceChart({ symbol, initialRange = "1M", onLatest }: Pr
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex justify-end">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <select
+            value={intervalChoice}
+            onChange={(e) => setIntervalChoice(e.target.value as IntervalChoice)}
+            className="tap rounded-lg border border-line bg-surface-2 px-2.5 py-1.5 text-xs font-medium text-content focus:outline-none focus:ring-1 focus:ring-brand"
+          >
+            {INTERVAL_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+          {data?.interval && INTERVAL_LABEL[data.interval] && (
+            <span className="text-xs text-muted">{INTERVAL_LABEL[data.interval]} candles</span>
+          )}
+        </div>
         <div className="flex gap-1 rounded-lg bg-surface-2 p-1">
           {RANGES.map((r) => (
             <button

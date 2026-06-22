@@ -10,16 +10,55 @@ import yfinance as yf
 
 logger = logging.getLogger(__name__)
 
-CandleRange = Literal["1D", "1W", "1M", "3M", "1Y"]
+CandleRange = Literal["1D", "1W", "1M", "3M", "1Y", "5Y", "MAX"]
 
-# (yfinance period, yfinance interval)
-_RANGE_CONFIG: dict[CandleRange, tuple[str, str]] = {
-    "1D": ("1d", "5m"),
-    "1W": ("5d", "30m"),
-    "1M": ("1mo", "1d"),
-    "3M": ("3mo", "1d"),
-    "1Y": ("1y", "1d"),
+# Time window (range) -> yfinance period. Decoupled from candle size below.
+_WINDOW_PERIOD: dict[str, str] = {
+    "1D": "1d",
+    "1W": "5d",
+    "1M": "1mo",
+    "3M": "3mo",
+    "1Y": "1y",
+    "5Y": "5y",
+    "MAX": "max",
 }
+
+# Default candle granularity per window when interval is "AUTO".
+_AUTO_INTERVAL: dict[str, str] = {
+    "1D": "5m",
+    "1W": "30m",
+    "1M": "1d",
+    "3M": "1d",
+    "1Y": "1d",
+    "5Y": "1wk",
+    "MAX": "1wk",
+}
+
+# User-selectable granularities -> yfinance interval.
+_INTERVAL_CHOICE: dict[str, str] = {"30M": "30m", "1D": "1d", "1W": "1wk"}
+
+
+def _resolve_period_interval(range_key: str, interval_key: str) -> tuple[str, str]:
+    """Map a (window, granularity) selection onto a valid yfinance (period, interval).
+
+    Lets the caller pick the time window and candle size independently, but
+    clamps combinations yfinance can't serve: intraday (30-min) history is
+    capped at ~60 days, and weekly/daily candles can't subdivide a single day.
+    """
+    period = _WINDOW_PERIOD.get(range_key, "1mo")
+    if interval_key not in _INTERVAL_CHOICE:  # "AUTO" or anything unknown
+        return period, _AUTO_INTERVAL.get(range_key, "1d")
+
+    interval = _INTERVAL_CHOICE[interval_key]
+    # 30-min candles only exist for the recent past; fall back to daily.
+    if interval == "30m" and range_key in ("3M", "1Y", "5Y", "MAX"):
+        interval = "1d"
+    # A single day/week can't be drawn with weekly (or daily) candles.
+    if range_key == "1D":
+        interval = "5m"
+    elif range_key == "1W" and interval == "1wk":
+        interval = "1d"
+    return period, interval
 
 
 def is_configured() -> bool:
@@ -52,10 +91,17 @@ def _fetch_sync(symbol: str, period: str, interval: str) -> dict:
     return {"candles": candles}
 
 
-async def fetch_candles(symbol: str, range_key: CandleRange) -> dict:
-    period, interval = _RANGE_CONFIG[range_key]
+async def fetch_candles(
+    symbol: str, range_key: CandleRange, interval_key: str = "AUTO"
+) -> dict:
+    period, interval = _resolve_period_interval(range_key, interval_key)
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, partial(_fetch_sync, symbol, period, interval))
+    payload = await loop.run_in_executor(
+        None, partial(_fetch_sync, symbol, period, interval)
+    )
+    # Report the interval actually used so the UI can reflect any clamping.
+    payload["interval"] = interval
+    return payload
 
 
 # --------------------------------------------------------------------------- #

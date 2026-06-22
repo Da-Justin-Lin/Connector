@@ -37,7 +37,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-_ALLOWED_RANGES: tuple[CandleRange, ...] = ("1D", "1W", "1M", "3M", "1Y")
+_ALLOWED_RANGES: tuple[CandleRange, ...] = ("1D", "1W", "1M", "3M", "1Y", "5Y", "MAX")
+_ALLOWED_INTERVALS: tuple[str, ...] = ("AUTO", "30M", "1D", "1W")
 
 # Symbols with intraday day charts on the macro tab; capped to keep fan-out small.
 _MACRO_SYMBOLS = ("SPY", "QQQ", "DIA", "IWM", "BTC-USD", "ETH-USD", "GLD", "^VIX")
@@ -58,11 +59,15 @@ _QUOTE_ALLOWED = frozenset(
 async def get_candles(
     symbol: str = Query(..., min_length=1, max_length=12),
     range: str = "1M",
+    interval: str = "AUTO",
     _: User = Depends(get_current_user),
 ):
     range_key = range.upper()
     if range_key not in _ALLOWED_RANGES:
         range_key = "1M"
+    interval_key = (interval or "AUTO").upper()
+    if interval_key not in _ALLOWED_INTERVALS:
+        interval_key = "AUTO"
 
     if not is_configured():
         return CandlesResponse(
@@ -74,7 +79,7 @@ async def get_candles(
         )
 
     try:
-        payload = await fetch_candles(symbol, range_key)  # type: ignore[arg-type]
+        payload = await fetch_candles(symbol, range_key, interval_key)  # type: ignore[arg-type]
     except Exception as exc:
         logger.warning("Candle fetch failed for %s/%s: %s", symbol, range_key, exc)
         return CandlesResponse(
@@ -85,6 +90,7 @@ async def get_candles(
             message="Failed to fetch market data right now. Try again in a minute.",
         )
 
+    interval_used = payload.get("interval")
     candles = [Candle(**c) for c in payload.get("candles", [])]
     if not candles:
         return CandlesResponse(
@@ -93,6 +99,7 @@ async def get_candles(
             candles=[],
             available=True,
             message="No candles available for this symbol in the selected range.",
+            interval=interval_used,
         )
 
     return CandlesResponse(
@@ -101,6 +108,7 @@ async def get_candles(
         candles=candles,
         available=True,
         message=None,
+        interval=interval_used,
     )
 
 
