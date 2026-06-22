@@ -54,6 +54,9 @@ export interface ToolDef {
   draw?: (args: ToolDrawArgs) => void;
   /** Whether the mouse is over the drawing's body (for click-to-select). */
   hitTest?: (args: ToolHitArgs) => boolean;
+  /** Anchor coordinates that can be typed in numerically when selected.
+   *  (Currently price; the editor renders one input per anchor per field.) */
+  editFields?: Array<"price">;
 }
 
 // Pixel tolerances for selecting a drawing.
@@ -165,6 +168,7 @@ export const DRAWING_TOOLS: ToolDef[] = [
       if (!a || !b || a.x == null || a.y == null || b.x == null || b.y == null) return false;
       return distToSegment(x, y, a.x, a.y, b.x, b.y) <= HIT_THRESHOLD;
     },
+    editFields: ["price"],
   },
   {
     id: "horizontal",
@@ -181,6 +185,7 @@ export const DRAWING_TOOLS: ToolDef[] = [
       const p = points[0];
       return p?.y != null && Math.abs(y - p.y) <= HIT_THRESHOLD;
     },
+    editFields: ["price"],
   },
   {
     id: "vertical",

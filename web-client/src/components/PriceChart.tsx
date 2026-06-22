@@ -14,6 +14,7 @@ import { useEffect, useRef, useState } from "react";
 import { useThemeColors } from "@/hooks/useThemeColors";
 import api from "@/services/api";
 import ChartToolbox from "./chart/ChartToolbox";
+import DrawingEditor from "./chart/DrawingEditor";
 import { DrawingsPrimitive } from "./chart/DrawingsPrimitive";
 import {
   DEFAULT_DRAW_COLOR,
@@ -438,6 +439,21 @@ export default function PriceChart({ symbol, initialRange = "1M", onLatest }: Pr
     const id = selectedIdRef.current;
     if (id) commitDrawings((prev) => prev.map((d) => (d.id === id ? { ...d, color } : d)));
   };
+  // Type an exact price for one of the selected drawing's anchors.
+  const setAnchorPrice = (anchorIndex: number, price: number) => {
+    const id = selectedIdRef.current;
+    if (!id) return;
+    commitDrawings((prev) =>
+      prev.map((d) => {
+        if (d.id !== id) return d;
+        const points = d.points.slice();
+        points[anchorIndex] = { ...points[anchorIndex], price };
+        return { ...d, points };
+      }),
+    );
+  };
+
+  const selectedDrawing = selectedId ? drawings.find((d) => d.id === selectedId) ?? null : null;
 
   return (
     <div className="flex h-full flex-col">
@@ -493,6 +509,11 @@ export default function PriceChart({ symbol, initialRange = "1M", onLatest }: Pr
             hasDrawings={drawings.length > 0}
           />
         </div>
+        {selectedDrawing && (
+          <div className="absolute right-2 top-2 z-10">
+            <DrawingEditor drawing={selectedDrawing} onPriceChange={setAnchorPrice} />
+          </div>
+        )}
         {loading && (
           <div className="absolute inset-0 flex items-center justify-center bg-surface/70 text-sm text-faint">
             Loading…
