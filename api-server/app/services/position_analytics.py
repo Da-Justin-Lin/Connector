@@ -35,18 +35,24 @@ def compute_trend_stats(candles: list[dict], current_price: float | None) -> dic
             return None
         return round(sum(closes[-n:]) / n, 4)
 
-    ma50 = _ma(50)
-    ma200 = _ma(200)
+    def _above(ma: float | None) -> bool | None:
+        return (price > ma) if (price is not None and ma is not None) else None
+
+    ma8, ma21, ma50, ma200 = _ma(8), _ma(21), _ma(50), _ma(200)
 
     return {
         "week52_high": round(week52_high, 4) if week52_high is not None else None,
         "week52_low": round(week52_low, 4) if week52_low is not None else None,
         "pct_from_high": _pct(week52_high),
         "pct_from_low": _pct(week52_low),
+        "ma8": ma8,
+        "ma21": ma21,
         "ma50": ma50,
         "ma200": ma200,
-        "above_ma50": (price > ma50) if (price is not None and ma50 is not None) else None,
-        "above_ma200": (price > ma200) if (price is not None and ma200 is not None) else None,
+        "above_ma8": _above(ma8),
+        "above_ma21": _above(ma21),
+        "above_ma50": _above(ma50),
+        "above_ma200": _above(ma200),
     }
 
 

@@ -26,8 +26,12 @@ interface PositionContext {
   week52_low: number | null;
   pct_from_high: number | null;
   pct_from_low: number | null;
+  ma8: number | null;
+  ma21: number | null;
   ma50: number | null;
   ma200: number | null;
+  above_ma8: boolean | null;
+  above_ma21: boolean | null;
   above_ma50: boolean | null;
   above_ma200: boolean | null;
   next_earnings_date: string | null;
@@ -112,9 +116,16 @@ function RangeBar({ low, high, price }: { low: number; high: number; price: numb
 }
 
 function PositionContextCard({ ctx, price }: { ctx: PositionContext; price: number | null }) {
+  const mas = [
+    { label: "8-day", value: ctx.ma8, above: ctx.above_ma8 },
+    { label: "21-day", value: ctx.ma21, above: ctx.above_ma21 },
+    { label: "50-day", value: ctx.ma50, above: ctx.above_ma50 },
+    { label: "200-day", value: ctx.ma200, above: ctx.above_ma200 },
+  ].filter((m) => m.value != null);
+
   const hasConcentration = ctx.weight_pct != null;
   const hasRange = ctx.week52_high != null && ctx.week52_low != null;
-  const hasTrend = ctx.above_ma50 != null || ctx.above_ma200 != null;
+  const hasTrend = mas.length > 0;
   const hasEarnings = ctx.next_earnings_date != null;
   if (!hasConcentration && !hasRange && !hasTrend && !hasEarnings) return null;
 
@@ -176,21 +187,24 @@ function PositionContextCard({ ctx, price }: { ctx: PositionContext; price: numb
         )}
 
         {hasTrend && (
-          <div className="flex items-center justify-between gap-3 px-6 py-4">
-            <p className="text-sm font-medium text-content">Trend</p>
-            <div className="flex flex-wrap justify-end gap-2">
-              {ctx.above_ma50 != null && (
-                <Badge
-                  label={`${ctx.above_ma50 ? "Above" : "Below"} 50-day`}
-                  tone={ctx.above_ma50 ? "up" : "down"}
-                />
-              )}
-              {ctx.above_ma200 != null && (
-                <Badge
-                  label={`${ctx.above_ma200 ? "Above" : "Below"} 200-day`}
-                  tone={ctx.above_ma200 ? "up" : "down"}
-                />
-              )}
+          <div className="px-6 py-4">
+            <p className="mb-3 text-sm font-medium text-content">Moving averages</p>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {mas.map((m) => {
+                const color =
+                  m.above == null ? "text-content" : m.above ? "text-up" : "text-down";
+                return (
+                  <div key={m.label} className="rounded-lg bg-surface-2 px-3 py-2.5">
+                    <p className="text-xs text-muted">{m.label}</p>
+                    <p className={`num text-sm font-semibold ${color}`}>${fmt(m.value!)}</p>
+                    {m.above != null && (
+                      <p className={`text-[10px] font-medium uppercase tracking-wide ${color}`}>
+                        {m.above ? "Above" : "Below"}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
