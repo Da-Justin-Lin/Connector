@@ -3,7 +3,10 @@
 import {
   CandlestickSeries,
   ColorType,
+  HistogramSeries,
+  LineSeries,
   createChart,
+  type CandlestickData,
   type IChartApi,
   type ISeriesApi,
   type MouseEventParams,
@@ -23,6 +26,35 @@ import {
   type Drawing,
   type DrawingPoint,
 } from "./chart/drawingTools";
+import {
+  INDICATOR_COLORS,
+  INDICATOR_MAP,
+  INDICATORS,
+  type Indicator,
+} from "./chart/indicators";
+
+const VOL_UP = "rgba(16,185,129,0.45)";
+const VOL_DOWN = "rgba(239,68,68,0.45)";
+
+interface HoverOhlc {
+  o: number;
+  h: number;
+  l: number;
+  c: number;
+  v: number | null;
+}
+
+function fmtPrice(n: number) {
+  return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function fmtVol(v: number | null) {
+  if (v == null) return "—";
+  if (v >= 1e9) return `${(v / 1e9).toFixed(2)}B`;
+  if (v >= 1e6) return `${(v / 1e6).toFixed(2)}M`;
+  if (v >= 1e3) return `${(v / 1e3).toFixed(1)}K`;
+  return `${Math.round(v)}`;
+}
 
 export type Range = "1D" | "1W" | "1M" | "3M" | "1Y" | "5Y" | "MAX";
 
@@ -93,10 +125,18 @@ export default function PriceChart({ symbol, initialRange = "1M", onLatest }: Pr
   const [drawings, setDrawings] = useState<Drawing[]>([]);
   const [activeColor, setActiveColor] = useState(DEFAULT_DRAW_COLOR);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [indicators, setIndicators] = useState<Indicator[]>([]);
+  const [hoverOhlc, setHoverOhlc] = useState<HoverOhlc | null>(null);
 
   const chartHostRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
+  // Live line series for each active indicator, keyed by indicator id.
+  const indicatorSeriesRef = useRef<Map<string, ISeriesApi<"Line">>>(new Map());
+  const indicatorsRef = useRef<Indicator[]>(indicators);
+  indicatorsRef.current = indicators;
+  const dataRef = useRef<CandlesResponse | null>(null);
   const onLatestRef = useRef(onLatest);
   onLatestRef.current = onLatest;
 
@@ -203,8 +243,21 @@ export default function PriceChart({ symbol, initialRange = "1M", onLatest }: Pr
       wickUpColor: "#10b981",
       wickDownColor: "#ef4444",
     });
+    // Leave room at the bottom for the volume histogram.
+    chart.priceScale("right").applyOptions({ scaleMargins: { top: 0.05, bottom: 0.25 } });
+
+    // Volume as a bottom overlay on its own (hidden) price scale.
+    const volumeSeries = chart.addSeries(HistogramSeries, {
+      priceFormat: { type: "volume" },
+      priceScaleId: "",
+      lastValueVisible: false,
+      priceLineVisible: false,
+    });
+    volumeSeries.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
+
     chartRef.current = chart;
     seriesRef.current = series;
+    volumeSeriesRef.current = volumeSeries;
 
     // Attach the drawings layer and the click/anchor state machine.
     const primitive = new DrawingsPrimitive();
@@ -244,6 +297,16 @@ export default function PriceChart({ symbol, initialRange = "1M", onLatest }: Pr
 
     // Rubber-band the in-progress drawing under the crosshair.
     const handleMove = (param: MouseEventParams) => {
+      // OHLC legend: read the hovered candle (and its volume) straight off the
+      // crosshair, falling back to "no hover" when off the data.
+      const bar = param.seriesData.get(series) as CandlestickData | undefined;
+      if (bar && param.point) {
+        const vol = param.seriesData.get(volumeSeries) as { value?: number } | undefined;
+        setHoverOhlc({ o: bar.open, h: bar.high, l: bar.low, c: bar.close, v: vol?.value ?? null });
+      } else {
+        setHoverOhlc(null);
+      }
+
       if (pendingRef.current.length === 0) return;
       const tool = TOOL_MAP[activeToolRef.current];
       if (!tool) return;
@@ -341,6 +404,8 @@ export default function PriceChart({ symbol, initialRange = "1M", onLatest }: Pr
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
+      volumeSeriesRef.current = null;
+      indicatorSeriesRef.current.clear();
     };
   }, []);
 
@@ -404,21 +469,99 @@ export default function PriceChart({ symbol, initialRange = "1M", onLatest }: Pr
     });
   }, [c]);
 
-  // Push data into series whenever it updates
+  // Recompute and push every active indicator's line from the current candles.
+  const applyIndicatorData = () => {
+    const candles = dataRef.current?.candles ?? [];
+    const closes = candles.map((cc) => cc.c);
+    for (const ind of indicatorsRef.current) {
+      const s = indicatorSeriesRef.current.get(ind.id);
+      const def = INDICATOR_MAP[ind.type];
+      if (!s || !def) continue;
+      const vals = def.compute(closes, ind.period);
+      const pts: { time: Time; value: number }[] = [];
+      for (let i = 0; i < candles.length; i++) {
+        const v = vals[i];
+        if (v != null) pts.push({ time: candles[i].t as Time, value: v });
+      }
+      s.setData(pts);
+    }
+  };
+
+  // Push candle + volume + indicator data whenever the response updates.
   useEffect(() => {
+    dataRef.current = data;
     if (!seriesRef.current || !data) return;
-    const points = data.candles.map((c) => ({
-      time: c.t as Time,
-      open: c.o,
-      high: c.h,
-      low: c.l,
-      close: c.c,
+    const points = data.candles.map((cc) => ({
+      time: cc.t as Time,
+      open: cc.o,
+      high: cc.h,
+      low: cc.l,
+      close: cc.c,
     }));
     seriesRef.current.setData(points);
+    volumeSeriesRef.current?.setData(
+      data.candles.map((cc) => ({
+        time: cc.t as Time,
+        value: cc.v,
+        color: cc.c >= cc.o ? VOL_UP : VOL_DOWN,
+      })),
+    );
+    applyIndicatorData();
     if (points.length > 0) {
       chartRef.current?.timeScale().fitContent();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
+
+  // Create / update / remove the line series for indicators as they change.
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    const map = indicatorSeriesRef.current;
+    for (const [id, s] of Array.from(map.entries())) {
+      if (!indicators.some((i) => i.id === id)) {
+        chart.removeSeries(s);
+        map.delete(id);
+      }
+    }
+    for (const ind of indicators) {
+      const existing = map.get(ind.id);
+      if (existing) {
+        existing.applyOptions({ color: ind.color });
+      } else {
+        map.set(
+          ind.id,
+          chart.addSeries(LineSeries, {
+            color: ind.color,
+            lineWidth: 2,
+            priceLineVisible: false,
+            lastValueVisible: false,
+            crosshairMarkerVisible: false,
+          }),
+        );
+      }
+    }
+    applyIndicatorData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [indicators]);
+
+  const addIndicator = (type: string) => {
+    const def = INDICATOR_MAP[type];
+    if (!def) return;
+    setIndicators((prev) => [
+      ...prev,
+      {
+        id: `i${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        type,
+        period: def.defaultPeriod,
+        color: INDICATOR_COLORS[prev.length % INDICATOR_COLORS.length],
+      },
+    ]);
+  };
+  const removeIndicator = (id: string) =>
+    setIndicators((prev) => prev.filter((i) => i.id !== id));
+  const setIndicatorPeriod = (id: string, period: number) =>
+    setIndicators((prev) => prev.map((i) => (i.id === id ? { ...i, period } : i)));
 
   const undoDrawing = () => commitDrawings((prev) => prev.slice(0, -1));
   const clearDrawings = () => {
@@ -455,10 +598,16 @@ export default function PriceChart({ symbol, initialRange = "1M", onLatest }: Pr
 
   const selectedDrawing = selectedId ? drawings.find((d) => d.id === selectedId) ?? null : null;
 
+  // OHLC legend shows the hovered candle, or the latest candle when not hovering.
+  const latest = data?.candles.at(-1);
+  const legend: HoverOhlc | null =
+    hoverOhlc ??
+    (latest ? { o: latest.o, h: latest.h, l: latest.l, c: latest.c, v: latest.v } : null);
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <select
             value={intervalChoice}
             onChange={(e) => setIntervalChoice(e.target.value as IntervalChoice)}
@@ -473,6 +622,50 @@ export default function PriceChart({ symbol, initialRange = "1M", onLatest }: Pr
           {data?.interval && INTERVAL_LABEL[data.interval] && (
             <span className="text-xs text-muted">{INTERVAL_LABEL[data.interval]} candles</span>
           )}
+
+          {/* Add an overlay indicator (Moving Average, …). */}
+          <select
+            value=""
+            onChange={(e) => {
+              if (e.target.value) addIndicator(e.target.value);
+            }}
+            className="tap rounded-lg border border-line bg-surface-2 px-2.5 py-1.5 text-xs font-medium text-content focus:outline-none focus:ring-1 focus:ring-brand"
+          >
+            <option value="">+ Indicator</option>
+            {INDICATORS.map((d) => (
+              <option key={d.type} value={d.type}>
+                {d.label}
+              </option>
+            ))}
+          </select>
+
+          {indicators.map((ind) => (
+            <span
+              key={ind.id}
+              className="flex items-center gap-1.5 rounded-md bg-surface-2 px-2 py-1 text-xs"
+            >
+              <span className="h-2 w-2 rounded-full" style={{ backgroundColor: ind.color }} />
+              <span className="font-medium text-muted">{INDICATOR_MAP[ind.type]?.short ?? ind.type}</span>
+              <input
+                type="number"
+                min={1}
+                value={ind.period}
+                onChange={(e) => {
+                  const p = Number.parseInt(e.target.value, 10);
+                  if (Number.isFinite(p) && p > 0) setIndicatorPeriod(ind.id, p);
+                }}
+                className="num w-12 rounded border border-line bg-surface px-1 py-0.5 text-right text-content focus:outline-none focus:ring-1 focus:ring-brand"
+              />
+              <button
+                type="button"
+                aria-label={`Remove ${ind.type}`}
+                onClick={() => removeIndicator(ind.id)}
+                className="tap text-faint hover:text-down"
+              >
+                ×
+              </button>
+            </span>
+          ))}
         </div>
         <div className="flex gap-1 rounded-lg bg-surface-2 p-1">
           {RANGES.map((r) => (
@@ -492,6 +685,31 @@ export default function PriceChart({ symbol, initialRange = "1M", onLatest }: Pr
       </div>
       <div className="relative mt-2 flex-1">
         <div ref={chartHostRef} className="absolute inset-0" />
+
+        {/* OHLC legend: hovered candle, or the latest when not hovering. */}
+        {legend && (
+          <div className="pointer-events-none absolute left-12 top-2 z-10 flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
+            {(
+              [
+                ["O", legend.o],
+                ["H", legend.h],
+                ["L", legend.l],
+                ["C", legend.c],
+              ] as const
+            ).map(([k, v]) => (
+              <span key={k} className="num text-muted">
+                {k}{" "}
+                <span className={k === "C" ? (legend.c >= legend.o ? "text-up" : "text-down") : "text-content"}>
+                  {fmtPrice(v)}
+                </span>
+              </span>
+            ))}
+            <span className="num text-muted">
+              Vol <span className="text-content">{fmtVol(legend.v)}</span>
+            </span>
+          </div>
+        )}
+
         <div className="absolute left-2 top-2 z-10">
           <ChartToolbox
             tools={DRAWING_TOOLS}
