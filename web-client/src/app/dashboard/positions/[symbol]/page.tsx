@@ -255,7 +255,7 @@ export default function PositionPage() {
 
       {/* Price chart */}
       <div className="card p-4">
-        <div className="h-80">
+        <div className="h-[32rem]">
           <PriceChart symbol={symbol} onLatest={(close) => setPrice(close)} />
         </div>
       </div>
