@@ -18,6 +18,7 @@ import { useThemeColors } from "@/hooks/useThemeColors";
 import api from "@/services/api";
 import ChartToolbox from "./chart/ChartToolbox";
 import DrawingEditor from "./chart/DrawingEditor";
+import IndicatorControls from "./chart/IndicatorControls";
 import { DrawingsPrimitive } from "./chart/DrawingsPrimitive";
 import {
   DEFAULT_DRAW_COLOR,
@@ -26,12 +27,7 @@ import {
   type Drawing,
   type DrawingPoint,
 } from "./chart/drawingTools";
-import {
-  INDICATOR_COLORS,
-  INDICATOR_MAP,
-  INDICATORS,
-  type Indicator,
-} from "./chart/indicators";
+import { INDICATOR_COLORS, INDICATOR_MAP, type Indicator } from "./chart/indicators";
 
 const VOL_UP = "rgba(16,185,129,0.45)";
 const VOL_DOWN = "rgba(239,68,68,0.45)";
@@ -562,6 +558,8 @@ export default function PriceChart({ symbol, initialRange = "1M", onLatest }: Pr
     setIndicators((prev) => prev.filter((i) => i.id !== id));
   const setIndicatorPeriod = (id: string, period: number) =>
     setIndicators((prev) => prev.map((i) => (i.id === id ? { ...i, period } : i)));
+  const setIndicatorColor = (id: string, color: string) =>
+    setIndicators((prev) => prev.map((i) => (i.id === id ? { ...i, color } : i)));
 
   const undoDrawing = () => commitDrawings((prev) => prev.slice(0, -1));
   const clearDrawings = () => {
@@ -623,49 +621,13 @@ export default function PriceChart({ symbol, initialRange = "1M", onLatest }: Pr
             <span className="text-xs text-muted">{INTERVAL_LABEL[data.interval]} candles</span>
           )}
 
-          {/* Add an overlay indicator (Moving Average, …). */}
-          <select
-            value=""
-            onChange={(e) => {
-              if (e.target.value) addIndicator(e.target.value);
-            }}
-            className="tap rounded-lg border border-line bg-surface-2 px-2.5 py-1.5 text-xs font-medium text-content focus:outline-none focus:ring-1 focus:ring-brand"
-          >
-            <option value="">+ Indicator</option>
-            {INDICATORS.map((d) => (
-              <option key={d.type} value={d.type}>
-                {d.label}
-              </option>
-            ))}
-          </select>
-
-          {indicators.map((ind) => (
-            <span
-              key={ind.id}
-              className="flex items-center gap-1.5 rounded-md bg-surface-2 px-2 py-1 text-xs"
-            >
-              <span className="h-2 w-2 rounded-full" style={{ backgroundColor: ind.color }} />
-              <span className="font-medium text-muted">{INDICATOR_MAP[ind.type]?.short ?? ind.type}</span>
-              <input
-                type="number"
-                min={1}
-                value={ind.period}
-                onChange={(e) => {
-                  const p = Number.parseInt(e.target.value, 10);
-                  if (Number.isFinite(p) && p > 0) setIndicatorPeriod(ind.id, p);
-                }}
-                className="num w-12 rounded border border-line bg-surface px-1 py-0.5 text-right text-content focus:outline-none focus:ring-1 focus:ring-brand"
-              />
-              <button
-                type="button"
-                aria-label={`Remove ${ind.type}`}
-                onClick={() => removeIndicator(ind.id)}
-                className="tap text-faint hover:text-down"
-              >
-                ×
-              </button>
-            </span>
-          ))}
+          <IndicatorControls
+            indicators={indicators}
+            onAdd={addIndicator}
+            onRemove={removeIndicator}
+            onPeriodChange={setIndicatorPeriod}
+            onColorChange={setIndicatorColor}
+          />
         </div>
         <div className="flex gap-1 rounded-lg bg-surface-2 p-1">
           {RANGES.map((r) => (
