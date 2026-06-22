@@ -107,10 +107,10 @@ function StatCard({
   const valueColor =
     tone === "up" ? "text-up" : tone === "down" ? "text-down" : "text-content";
   return (
-    <div className="card p-6">
-      <p className="text-sm text-muted">{label}</p>
-      <p className={`mt-1 text-2xl font-bold ${valueColor}`}>{value}</p>
-      {hint && <p className={`mt-0.5 text-xs ${valueColor}`}>{hint}</p>}
+    <div className="card card-hover p-6">
+      <p className="text-xs font-medium uppercase tracking-wide text-muted">{label}</p>
+      <p className={`num mt-1 text-2xl font-bold tracking-tight ${valueColor}`}>{value}</p>
+      {hint && <p className={`num mt-0.5 text-xs ${valueColor}`}>{hint}</p>}
     </div>
   );
 }
@@ -213,7 +213,9 @@ export default function ReportsPage() {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-bold text-content">Weekly Report</h1>
+            <h1 className="bg-brand bg-clip-text text-2xl font-bold tracking-tight text-transparent">
+              Weekly Report
+            </h1>
             {(revalidating || data?.stale) && data && (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand">
                 <span className="h-2 w-2 animate-pulse rounded-full bg-brand" />
@@ -229,21 +231,21 @@ export default function ReportsPage() {
           <AccountFilter value={selectedAccountId} onChange={setSelectedAccountId} />
           <button
             onClick={() => setWeekOffset((w) => w - 1)}
-            className="rounded-md border border-line bg-surface px-3 py-1.5 text-sm font-medium text-content hover:bg-surface-2"
+            className="tap rounded-md border border-line bg-surface px-3 py-1.5 text-sm font-medium text-content hover:bg-surface-2"
           >
             ← Previous
           </button>
           <button
             onClick={() => setWeekOffset(0)}
             disabled={weekOffset === 0}
-            className="rounded-md border border-line bg-surface px-3 py-1.5 text-sm font-medium text-content hover:bg-surface-2 disabled:opacity-50"
+            className="tap rounded-md border border-line bg-surface px-3 py-1.5 text-sm font-medium text-content hover:bg-surface-2 disabled:opacity-50"
           >
             This week
           </button>
           <button
             onClick={() => setWeekOffset((w) => w + 1)}
             disabled={!canGoNext}
-            className="rounded-md border border-line bg-surface px-3 py-1.5 text-sm font-medium text-content hover:bg-surface-2 disabled:opacity-50"
+            className="tap rounded-md border border-line bg-surface px-3 py-1.5 text-sm font-medium text-content hover:bg-surface-2 disabled:opacity-50"
           >
             Next →
           </button>
@@ -369,7 +371,7 @@ export default function ReportsPage() {
                             )}
                           </td>
                           <td
-                            className={`px-4 py-3 ${
+                            className={`num px-4 py-3 ${
                               p.realized_pnl >= 0
                                 ? "text-up"
                                 : "text-down"
@@ -378,7 +380,7 @@ export default function ReportsPage() {
                             {signed(p.realized_pnl)}
                           </td>
                           <td
-                            className={`px-4 py-3 ${
+                            className={`num px-4 py-3 ${
                               p.unrealized_pnl >= 0
                                 ? "text-up"
                                 : "text-down"
@@ -387,7 +389,7 @@ export default function ReportsPage() {
                             {signed(p.unrealized_pnl)}
                           </td>
                           <td
-                            className={`px-4 py-3 font-semibold ${
+                            className={`num px-4 py-3 font-semibold ${
                               total >= 0 ? "text-up" : "text-down"
                             }`}
                           >
@@ -454,9 +456,9 @@ export default function ReportsPage() {
                         >
                           {t.action}
                         </td>
-                        <td className="px-4 py-3 text-content">{t.units.toFixed(4)}</td>
-                        <td className="px-4 py-3 text-content">${t.price.toFixed(2)}</td>
-                        <td className="px-4 py-3 font-medium text-content">
+                        <td className="num px-4 py-3 text-content">{t.units.toFixed(4)}</td>
+                        <td className="num px-4 py-3 text-content">${t.price.toFixed(2)}</td>
+                        <td className="num px-4 py-3 font-medium text-content">
                           ${fmt(Math.abs(t.amount))}
                         </td>
                       </tr>

@@ -228,7 +228,7 @@ export default function MacroPage() {
           return (
             <div className="flex items-center justify-between text-sm">
               <span className="text-muted">10Y − 3M spread</span>
-              <span className={`font-semibold ${inverted ? "text-down" : "text-up"}`}>
+              <span className={`num font-semibold ${inverted ? "text-down" : "text-up"}`}>
                 {spread >= 0 ? "+" : "−"}
                 {Math.abs(spread).toFixed(2)} pts
                 {inverted && <span className="ml-2 font-normal text-down">(inverted)</span>}

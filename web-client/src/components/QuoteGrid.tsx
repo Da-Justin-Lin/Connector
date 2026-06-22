@@ -55,7 +55,7 @@ function fmtChange(q: Quote, kind: Kind) {
 
 // Background tint for heatmap tiles, scaled by day move (caps at ±3%).
 function heatColor(changePct: number | null) {
-  if (changePct == null) return "#f9fafb";
+  if (changePct == null) return "transparent";
   const capped = Math.max(-0.03, Math.min(0.03, changePct));
   const intensity = Math.abs(capped) / 0.03; // 0..1
   const alpha = 0.08 + intensity * 0.22;
@@ -128,14 +128,14 @@ export default function QuoteGrid({
               return (
                 <div
                   key={q.symbol}
-                  className="rounded-lg border border-line/60 p-3"
+                  className="rounded-lg border border-line/60 p-3 transition-transform duration-200 hover:-translate-y-0.5"
                   style={heatmap ? { background: heatColor(q.change_pct) } : undefined}
                 >
                   <p className="truncate text-xs font-medium text-muted">
                     {labels[q.symbol] ?? q.symbol}
                   </p>
-                  <p className="mt-0.5 text-sm font-bold text-content">{fmtValue(q, kind)}</p>
-                  <p className={`text-xs font-medium ${up ? "text-up" : "text-down"}`}>
+                  <p className="num mt-0.5 text-sm font-bold text-content">{fmtValue(q, kind)}</p>
+                  <p className={`num text-xs font-medium ${up ? "text-up" : "text-down"}`}>
                     {fmtChange(q, kind)}
                   </p>
                 </div>

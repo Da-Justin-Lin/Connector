@@ -1,5 +1,7 @@
 "use client";
 
+import { useThemeColors } from "@/hooks/useThemeColors";
+
 export interface FearGreed {
   score: number | null;
   rating: string | null;
@@ -35,7 +37,7 @@ function Row({ label, value }: { label: string; value: number | null | undefined
   return (
     <div className="flex items-center justify-between text-xs">
       <span className="text-muted">{label}</span>
-      <span className="flex items-center gap-1.5 font-medium text-content">
+      <span className="num flex items-center gap-1.5 font-medium text-content">
         <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: dotColor }} />
         {value == null ? "—" : Math.round(value)}
       </span>
@@ -67,6 +69,7 @@ function arcPath(fromPct: number, toPct: number, r: number = RADIUS) {
 }
 
 export default function FearGreedGauge({ fg, title = "Fear & Greed", source = "CNN" }: FearGreedGaugeProps) {
+  const tc = useThemeColors();
   const score = fg.score;
   const color = score == null ? "#9ca3af" : scoreColor(score);
   const activeLabel = score == null ? null : rangeForScore(score).label;
@@ -144,23 +147,23 @@ export default function FearGreedGauge({ fg, title = "Fear & Greed", source = "C
                 y1={CY}
                 x2={needleTip.x}
                 y2={needleTip.y}
-                stroke="#374151"
+                stroke={tc.content}
                 strokeWidth={2.5}
                 strokeLinecap="round"
                 filter="url(#fgNeedleShadow)"
               />
-              <circle cx={CX} cy={CY} r="7" fill="#ffffff" stroke={color} strokeWidth={3} filter="url(#fgNeedleShadow)" />
+              <circle cx={CX} cy={CY} r="7" fill={tc.surface} stroke={color} strokeWidth={3} filter="url(#fgNeedleShadow)" />
 
               {/* End labels */}
-              <text x={pointAt(0).x} y={pointAt(0).y + 14} textAnchor="start" fontSize={8} fill="#9ca3af">
+              <text x={pointAt(0).x} y={pointAt(0).y + 14} textAnchor="start" fontSize={8} fill={tc.faint}>
                 0
               </text>
-              <text x={pointAt(1).x} y={pointAt(1).y + 14} textAnchor="end" fontSize={8} fill="#9ca3af">
+              <text x={pointAt(1).x} y={pointAt(1).y + 14} textAnchor="end" fontSize={8} fill={tc.faint}>
                 100
               </text>
             </svg>
 
-            <p className="-mt-5 text-3xl font-bold" style={{ color }}>
+            <p className="num -mt-5 text-3xl font-bold" style={{ color }}>
               {Math.round(score)}
             </p>
             <p

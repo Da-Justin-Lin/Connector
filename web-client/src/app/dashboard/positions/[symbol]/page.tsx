@@ -51,9 +51,9 @@ function fmtDate(iso: string) {
 function StatCard({ label, value, tone = "default" }: { label: string; value: string; tone?: "default" | "up" | "down" }) {
   const color = tone === "up" ? "text-up" : tone === "down" ? "text-down" : "text-content";
   return (
-    <div className="card p-5">
-      <p className="text-sm text-muted">{label}</p>
-      <p className={`mt-1 text-2xl font-bold ${color}`}>{value}</p>
+    <div className="card card-hover p-5">
+      <p className="text-xs font-medium uppercase tracking-wide text-muted">{label}</p>
+      <p className={`num mt-1 text-2xl font-bold tracking-tight ${color}`}>{value}</p>
     </div>
   );
 }
@@ -94,7 +94,7 @@ export default function PositionPage() {
           <p className="text-sm text-muted">{detail?.name ?? "—"}</p>
         </div>
         {price !== null && (
-          <p className="text-2xl font-bold text-content">${fmt(price)}</p>
+          <p className="num text-3xl font-bold tracking-tight text-content">${fmt(price)}</p>
         )}
       </div>
 
@@ -168,9 +168,9 @@ export default function PositionPage() {
                         <div className="text-xs font-normal text-muted">{t.description}</div>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-content">{t.units.toFixed(4)}</td>
-                    <td className="px-4 py-3 text-content">${t.price.toFixed(2)}</td>
-                    <td className="px-4 py-3 font-medium text-content">${fmt(Math.abs(t.amount))}</td>
+                    <td className="num px-4 py-3 text-content">{t.units.toFixed(4)}</td>
+                    <td className="num px-4 py-3 text-content">${t.price.toFixed(2)}</td>
+                    <td className="num px-4 py-3 font-medium text-content">${fmt(Math.abs(t.amount))}</td>
                   </tr>
                 ))}
               </tbody>

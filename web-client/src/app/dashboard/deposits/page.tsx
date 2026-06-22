@@ -138,11 +138,15 @@ export default function DepositsPage() {
   return (
     <div className="flex flex-col gap-8">
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <h1 className="text-2xl font-bold text-content">Deposits</h1>
+        <h1 className="bg-brand bg-clip-text text-2xl font-bold tracking-tight text-transparent">
+          Deposits
+        </h1>
         {data && (
-          <div className="card px-6 py-3">
-            <p className="text-xs text-muted">Total Principal</p>
-            <p className="text-2xl font-bold text-content">${fmt(data.total_principal)}</p>
+          <div className="card card-hover px-6 py-3 shadow-glow">
+            <p className="text-xs uppercase tracking-wide text-muted">Total Principal</p>
+            <p className="num text-2xl font-bold tracking-tight text-content">
+              ${fmt(data.total_principal)}
+            </p>
           </div>
         )}
       </div>
@@ -152,10 +156,10 @@ export default function DepositsPage() {
           {data.per_account.map((pa) => (
             <div
               key={pa.investment_account_id}
-              className="card p-4"
+              className="card card-hover p-4"
             >
               <p className="text-xs text-muted">{accountLabel(pa)}</p>
-              <p className="mt-1 text-xl font-bold text-content">
+              <p className="num mt-1 text-xl font-bold text-content">
                 ${fmt(pa.total_principal)}
               </p>
               {pa.account_name && pa.institution_name && (
@@ -178,7 +182,7 @@ export default function DepositsPage() {
               value={accountId}
               onChange={(e) => setAccountId(e.target.value)}
               required
-              className="mt-1 w-full rounded-md border border-line px-3 py-2 text-sm focus:border-brand focus:outline-none"
+              className="mt-1 w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-content focus:border-brand focus:outline-none"
             >
               {accounts.length === 0 && (
                 <option value="">No connected accounts</option>
@@ -200,7 +204,7 @@ export default function DepositsPage() {
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               required
-              className="mt-1 w-full rounded-md border border-line px-3 py-2 text-sm focus:border-brand focus:outline-none"
+              className="mt-1 w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-content focus:border-brand focus:outline-none"
             />
           </div>
           <div>
@@ -210,7 +214,7 @@ export default function DepositsPage() {
               value={depositedAt}
               onChange={(e) => setDepositedAt(e.target.value)}
               required
-              className="mt-1 w-full rounded-md border border-line px-3 py-2 text-sm focus:border-brand focus:outline-none"
+              className="mt-1 w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-content focus:border-brand focus:outline-none"
             />
           </div>
           <div>
@@ -220,14 +224,14 @@ export default function DepositsPage() {
               value={note}
               onChange={(e) => setNote(e.target.value)}
               placeholder="optional"
-              className="mt-1 w-full rounded-md border border-line px-3 py-2 text-sm focus:border-brand focus:outline-none"
+              className="mt-1 w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-content focus:border-brand focus:outline-none"
             />
           </div>
         </div>
         <button
           type="submit"
           disabled={submitting || accounts.length === 0}
-          className="mt-4 rounded-md bg-brand px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+          className="tap mt-4 rounded-md bg-brand px-4 py-2 text-sm font-medium text-white shadow-soft hover:opacity-90 disabled:opacity-50"
         >
           {submitting ? "Adding…" : "Add deposit"}
         </button>
@@ -265,12 +269,12 @@ export default function DepositsPage() {
                     <td className="px-6 py-3 text-content">
                       {acc ? accountLabel(acc) : "—"}
                     </td>
-                    <td className="px-6 py-3 font-medium text-content">${fmt(d.amount)}</td>
+                    <td className="num px-6 py-3 font-medium text-content">${fmt(d.amount)}</td>
                     <td className="px-6 py-3 text-muted">{d.note ?? "—"}</td>
                     <td className="px-6 py-3 text-right">
                       <button
                         onClick={() => remove(d.id)}
-                        className="text-xs font-medium text-down hover:text-down hover:opacity-80"
+                        className="tap text-xs font-medium text-down hover:opacity-80"
                       >
                         Delete
                       </button>
