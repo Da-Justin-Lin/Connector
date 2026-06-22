@@ -121,7 +121,11 @@ export default function PriceChart({ symbol, initialRange = "1M", onLatest }: Pr
   const [drawings, setDrawings] = useState<Drawing[]>([]);
   const [activeColor, setActiveColor] = useState(DEFAULT_DRAW_COLOR);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [indicators, setIndicators] = useState<Indicator[]>([]);
+  // Every chart starts with the 8/21 moving-average pair (orange / blue).
+  const [indicators, setIndicators] = useState<Indicator[]>(() => [
+    { id: "default-ma8", type: "sma", period: 8, color: "#f59e0b" },
+    { id: "default-ma21", type: "sma", period: 21, color: "#3b82f6" },
+  ]);
   const [hoverOhlc, setHoverOhlc] = useState<HoverOhlc | null>(null);
 
   const chartHostRef = useRef<HTMLDivElement | null>(null);
