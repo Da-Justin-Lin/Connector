@@ -10,6 +10,8 @@ export interface ThemeColors {
   muted: string;
   faint: string;
   line: string;
+  surface: string;
+  content: string;
 }
 
 const FALLBACK: ThemeColors = {
@@ -20,6 +22,8 @@ const FALLBACK: ThemeColors = {
   muted: "rgb(107 114 128)",
   faint: "rgb(156 163 175)",
   line: "rgb(229 231 235)",
+  surface: "rgb(255 255 255)",
+  content: "rgb(17 24 39)",
 };
 
 function read(): ThemeColors {
@@ -37,6 +41,8 @@ function read(): ThemeColors {
     muted: v("--muted") || FALLBACK.muted,
     faint: v("--faint") || FALLBACK.faint,
     line: v("--line") || FALLBACK.line,
+    surface: v("--surface") || FALLBACK.surface,
+    content: v("--content") || FALLBACK.content,
   };
 }
 

@@ -10,6 +10,7 @@ import {
 } from "lightweight-charts";
 import { useEffect, useRef, useState } from "react";
 
+import { useThemeColors } from "@/hooks/useThemeColors";
 import api from "@/services/api";
 
 export type Range = "1D" | "1W" | "1M" | "3M" | "1Y";
@@ -53,6 +54,7 @@ export default function PriceChart({ symbol, initialRange = "1M", onLatest }: Pr
   const [range, setRange] = useState<Range>(initialRange);
   const [data, setData] = useState<CandlesResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const c = useThemeColors();
 
   const chartHostRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -100,13 +102,14 @@ export default function PriceChart({ symbol, initialRange = "1M", onLatest }: Pr
     if (!chartHostRef.current) return;
     const chart = createChart(chartHostRef.current, {
       layout: {
-        background: { type: ColorType.Solid, color: "#ffffff" },
-        textColor: "#374151",
+        background: { type: ColorType.Solid, color: "transparent" },
+        textColor: "#9ca3af",
         fontSize: 11,
+        attributionLogo: false,
       },
       grid: {
-        vertLines: { color: "#f3f4f6" },
-        horzLines: { color: "#f3f4f6" },
+        vertLines: { visible: false },
+        horzLines: { color: "rgba(148,163,184,0.12)" },
       },
       rightPriceScale: { borderVisible: false },
       timeScale: { borderVisible: false, timeVisible: true, secondsVisible: false },
@@ -127,6 +130,20 @@ export default function PriceChart({ symbol, initialRange = "1M", onLatest }: Pr
       seriesRef.current = null;
     };
   }, []);
+
+  // Re-theme the chart (text/grid/candle colors) when the theme flips.
+  useEffect(() => {
+    chartRef.current?.applyOptions({
+      layout: { textColor: c.muted },
+      grid: { horzLines: { color: c.line } },
+    });
+    seriesRef.current?.applyOptions({
+      upColor: c.up,
+      downColor: c.down,
+      wickUpColor: c.up,
+      wickDownColor: c.down,
+    });
+  }, [c]);
 
   // Push data into series whenever it updates
   useEffect(() => {
@@ -152,7 +169,7 @@ export default function PriceChart({ symbol, initialRange = "1M", onLatest }: Pr
             <button
               key={r}
               onClick={() => setRange(r)}
-              className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+              className={`tap rounded-md px-3 py-1 text-xs font-medium transition-colors ${
                 range === r
                   ? "bg-surface text-content shadow-sm"
                   : "text-muted hover:text-content"

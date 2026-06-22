@@ -10,6 +10,8 @@ import {
 } from "lightweight-charts";
 import { useEffect, useRef } from "react";
 
+import { useThemeColors } from "@/hooks/useThemeColors";
+
 export interface Candle {
   t: number;
   o: number;
@@ -55,19 +57,22 @@ export default function MarketSnapshotCard({ snap }: { snap: Snapshot }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Area"> | null>(null);
+  const c = useThemeColors();
 
   const up = (snap.change ?? 0) >= 0;
-  const lineColor = up ? "#10b981" : "#ef4444";
-  const topColor = up ? "rgba(16,185,129,0.20)" : "rgba(239,68,68,0.20)";
+  const lineColor = up ? c.up : c.down;
+  const topColor = up ? "rgba(16,185,129,0.22)" : "rgba(239,68,68,0.22)";
 
-  // Create the chart once.
+  // Create the chart once. Background is transparent so the card surface shows
+  // through in both light and dark themes.
   useEffect(() => {
     if (!hostRef.current) return;
     const chart = createChart(hostRef.current, {
       layout: {
-        background: { type: ColorType.Solid, color: "#ffffff" },
+        background: { type: ColorType.Solid, color: "transparent" },
         textColor: "#9ca3af",
         fontSize: 10,
+        attributionLogo: false,
       },
       grid: { vertLines: { visible: false }, horzLines: { visible: false } },
       rightPriceScale: { visible: false },
@@ -81,7 +86,7 @@ export default function MarketSnapshotCard({ snap }: { snap: Snapshot }) {
     const series = chart.addSeries(AreaSeries, {
       lineColor,
       topColor,
-      bottomColor: "rgba(255,255,255,0)",
+      bottomColor: "rgba(0,0,0,0)",
       lineWidth: 2,
       priceLineVisible: false,
       lastValueVisible: false,
@@ -116,8 +121,8 @@ export default function MarketSnapshotCard({ snap }: { snap: Snapshot }) {
           <p className="text-xs text-muted">{LABELS[snap.symbol] ?? ""}</p>
         </div>
         <div className="text-right">
-          <p className="text-lg font-bold text-content">{fmtPrice(snap.last_price)}</p>
-          <p className={`text-xs font-medium ${up ? "text-up" : "text-down"}`}>
+          <p className="num text-lg font-bold text-content">{fmtPrice(snap.last_price)}</p>
+          <p className={`num text-xs font-medium ${up ? "text-up" : "text-down"}`}>
             {snap.change == null ? "—" : `${up ? "+" : "−"}${fmtPrice(Math.abs(snap.change))}`}{" "}
             ({fmtPct(snap.change_pct)})
           </p>
