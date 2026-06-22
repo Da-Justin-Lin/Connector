@@ -84,6 +84,32 @@ class PositionTrade(BaseModel):
     description: str | None = None
 
 
+class PositionContext(BaseModel):
+    """Pre-trade decision context: concentration, range, trend, earnings.
+
+    Every field is optional so the endpoint can degrade gracefully when market
+    data or holdings are unavailable; the UI hides what it can't show.
+    """
+
+    # Concentration (fractions of total book incl. cash; 0.38 = 38%)
+    portfolio_value: float | None = None
+    weight_pct: float | None = None
+    sector: str | None = None
+    sector_weight_pct: float | None = None
+    # 52-week range + moving-average trend (from 1Y daily candles)
+    week52_high: float | None = None
+    week52_low: float | None = None
+    pct_from_high: float | None = None  # negative = below the high
+    pct_from_low: float | None = None
+    ma50: float | None = None
+    ma200: float | None = None
+    above_ma50: bool | None = None
+    above_ma200: bool | None = None
+    # Earnings proximity
+    next_earnings_date: str | None = None  # YYYY-MM-DD
+    days_to_earnings: int | None = None
+
+
 class PositionDetailResponse(BaseModel):
     symbol: str
     name: str | None = None
@@ -97,3 +123,4 @@ class PositionDetailResponse(BaseModel):
     unrealized_pnl_pct: float | None = None
     accounts: int = 0
     trades: list[PositionTrade] = []
+    context: PositionContext | None = None

@@ -482,3 +482,21 @@ async def fetch_earnings(days: int = 14) -> list[dict]:
             out.append(r)
     out.sort(key=lambda r: r["date"])
     return out
+
+
+async def fetch_next_earnings(symbol: str) -> str | None:
+    """Next earnings date (YYYY-MM-DD) for an arbitrary symbol, or None.
+
+    Reuses the per-symbol yfinance lookup that backs the macro watchlist, so it
+    works for any held ticker without expanding the curated list. Only returns
+    a date that is today or later.
+    """
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, partial(_earnings_sync, symbol.upper()))
+    if not isinstance(result, dict):
+        return None
+    date = result.get("date")
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if not date or date < today:
+        return None
+    return date

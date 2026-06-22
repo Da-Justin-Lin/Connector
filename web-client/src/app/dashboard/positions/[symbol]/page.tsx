@@ -17,6 +17,23 @@ interface PositionTrade {
   description: string | null;
 }
 
+interface PositionContext {
+  portfolio_value: number | null;
+  weight_pct: number | null;
+  sector: string | null;
+  sector_weight_pct: number | null;
+  week52_high: number | null;
+  week52_low: number | null;
+  pct_from_high: number | null;
+  pct_from_low: number | null;
+  ma50: number | null;
+  ma200: number | null;
+  above_ma50: boolean | null;
+  above_ma200: boolean | null;
+  next_earnings_date: string | null;
+  days_to_earnings: number | null;
+}
+
 interface PositionDetail {
   symbol: string;
   name: string | null;
@@ -30,6 +47,7 @@ interface PositionDetail {
   unrealized_pnl_pct: number | null;
   accounts: number;
   trades: PositionTrade[];
+  context: PositionContext | null;
 }
 
 function fmt(n: number) {
@@ -54,6 +72,129 @@ function StatCard({ label, value, tone = "default" }: { label: string; value: st
     <div className="card card-hover p-5">
       <p className="text-xs font-medium uppercase tracking-wide text-muted">{label}</p>
       <p className={`num mt-1 text-2xl font-bold tracking-tight ${color}`}>{value}</p>
+    </div>
+  );
+}
+
+function Badge({ label, tone }: { label: string; tone: "up" | "down" | "warn" | "muted" }) {
+  const cls =
+    tone === "up"
+      ? "bg-up/15 text-up"
+      : tone === "down"
+      ? "bg-down/15 text-down"
+      : tone === "warn"
+      ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+      : "bg-surface-2 text-muted";
+  return (
+    <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${cls}`}>{label}</span>
+  );
+}
+
+function RangeBar({ low, high, price }: { low: number; high: number; price: number | null }) {
+  const span = high - low;
+  const pos = price != null && span > 0 ? Math.min(1, Math.max(0, (price - low) / span)) : null;
+  return (
+    <div>
+      <div className="relative h-2 rounded-full bg-surface-2">
+        {pos != null && (
+          <div
+            className="absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-surface bg-brand"
+            style={{ left: `${pos * 100}%` }}
+          />
+        )}
+      </div>
+      <div className="mt-1.5 flex justify-between text-xs text-muted">
+        <span className="num">${fmt(low)}</span>
+        <span className="num">${fmt(high)}</span>
+      </div>
+    </div>
+  );
+}
+
+function PositionContextCard({ ctx, price }: { ctx: PositionContext; price: number | null }) {
+  const hasConcentration = ctx.weight_pct != null;
+  const hasRange = ctx.week52_high != null && ctx.week52_low != null;
+  const hasTrend = ctx.above_ma50 != null || ctx.above_ma200 != null;
+  const hasEarnings = ctx.next_earnings_date != null;
+  if (!hasConcentration && !hasRange && !hasTrend && !hasEarnings) return null;
+
+  const earningsSoon = ctx.days_to_earnings != null && ctx.days_to_earnings <= 7;
+  const concentrated = ctx.weight_pct != null && ctx.weight_pct >= 0.25;
+
+  return (
+    <div className="overflow-hidden card">
+      <div className="border-b border-line bg-surface-2 px-6 py-4">
+        <p className="text-base font-semibold text-content">Position context</p>
+        <p className="mt-0.5 text-xs text-muted">
+          Pre-trade signals to weigh before adding or trimming.
+        </p>
+      </div>
+      <div className="flex flex-col divide-y divide-line">
+        {hasEarnings && (
+          <div className="flex items-center justify-between gap-3 px-6 py-4">
+            <div>
+              <p className="text-sm font-medium text-content">Upcoming earnings</p>
+              <p className="text-xs text-muted">{fmtDate(ctx.next_earnings_date!)}</p>
+            </div>
+            <Badge
+              label={
+                ctx.days_to_earnings == null
+                  ? "Scheduled"
+                  : ctx.days_to_earnings === 0
+                  ? "Today"
+                  : `in ${ctx.days_to_earnings}d`
+              }
+              tone={earningsSoon ? "warn" : "muted"}
+            />
+          </div>
+        )}
+
+        {hasConcentration && (
+          <div className="flex items-center justify-between gap-3 px-6 py-4">
+            <div>
+              <p className="text-sm font-medium text-content">Portfolio weight</p>
+              <p className="text-xs text-muted">
+                {ctx.sector
+                  ? `${ctx.sector} sector: ${fmtPct(ctx.sector_weight_pct)} of book`
+                  : "Share of your total holdings + cash"}
+              </p>
+            </div>
+            <Badge label={fmtPct(ctx.weight_pct)} tone={concentrated ? "warn" : "muted"} />
+          </div>
+        )}
+
+        {hasRange && (
+          <div className="px-6 py-4">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-sm font-medium text-content">52-week range</p>
+              <span className="num text-xs text-muted">
+                {ctx.pct_from_high != null ? `${fmtPct(ctx.pct_from_high)} from high` : ""}
+              </span>
+            </div>
+            <RangeBar low={ctx.week52_low!} high={ctx.week52_high!} price={price} />
+          </div>
+        )}
+
+        {hasTrend && (
+          <div className="flex items-center justify-between gap-3 px-6 py-4">
+            <p className="text-sm font-medium text-content">Trend</p>
+            <div className="flex flex-wrap justify-end gap-2">
+              {ctx.above_ma50 != null && (
+                <Badge
+                  label={`${ctx.above_ma50 ? "Above" : "Below"} 50-day`}
+                  tone={ctx.above_ma50 ? "up" : "down"}
+                />
+              )}
+              {ctx.above_ma200 != null && (
+                <Badge
+                  label={`${ctx.above_ma200 ? "Above" : "Below"} 200-day`}
+                  tone={ctx.above_ma200 ? "up" : "down"}
+                />
+              )}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -127,6 +268,9 @@ export default function PositionPage() {
       ) : (
         <p className="text-sm text-down">Failed to load position details.</p>
       )}
+
+      {/* Pre-trade context */}
+      {detail?.context && <PositionContextCard ctx={detail.context} price={price} />}
 
       {/* Trade history */}
       <div className="overflow-hidden card">
