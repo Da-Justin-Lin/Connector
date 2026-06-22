@@ -27,13 +27,22 @@ export interface ToolDrawArgs {
   width: number;
   height: number;
   color: string;
+  /** True for the selected drawing (and the in-progress preview): show handles. */
+  selected: boolean;
   points: PixelPoint[];
+}
+
+export interface ToolHitArgs {
+  points: PixelPoint[];
+  x: number;
+  y: number;
 }
 
 /**
  * A drawing tool. The registry below is the single source of truth: the
- * toolbar, the click/anchor state machine, and the canvas renderer are all
- * driven by these entries, so adding a tool is just one more `ToolDef`.
+ * toolbar, the click/anchor state machine, the renderer, and hit-testing for
+ * selection are all driven by these entries, so adding a tool is just one more
+ * `ToolDef` (icon + anchor count + draw + hitTest).
  */
 export interface ToolDef {
   id: string;
@@ -43,7 +52,17 @@ export interface ToolDef {
   icon: ReactNode;
   /** Paint the drawing given its anchors resolved to pixels. */
   draw?: (args: ToolDrawArgs) => void;
+  /** Whether the mouse is over the drawing's body (for click-to-select). */
+  hitTest?: (args: ToolHitArgs) => boolean;
 }
+
+// Pixel tolerances for selecting a drawing.
+export const HANDLE_RADIUS = 8;
+const HIT_THRESHOLD = 6;
+
+// Colors offered in the toolbox palette.
+export const PALETTE = ["#3b82f6", "#ef4444", "#22c55e", "#f59e0b", "#a855f7", "#e5e7eb"];
+export const DEFAULT_DRAW_COLOR = PALETTE[0];
 
 // --- canvas helpers -------------------------------------------------------- #
 
@@ -54,10 +73,11 @@ function strokeLine(
   x2: number,
   y2: number,
   color: string,
+  selected: boolean,
 ): void {
   ctx.save();
   ctx.strokeStyle = color;
-  ctx.lineWidth = 1.5;
+  ctx.lineWidth = selected ? 2.5 : 1.5;
   ctx.beginPath();
   ctx.moveTo(x1, y1);
   ctx.lineTo(x2, y2);
@@ -69,12 +89,27 @@ function drawHandle(ctx: CanvasRenderingContext2D, x: number, y: number, color: 
   ctx.save();
   ctx.fillStyle = color;
   ctx.strokeStyle = "#ffffff";
-  ctx.lineWidth = 1;
+  ctx.lineWidth = 1.5;
   ctx.beginPath();
-  ctx.arc(x, y, 3.5, 0, Math.PI * 2);
+  ctx.arc(x, y, 4, 0, Math.PI * 2);
   ctx.fill();
   ctx.stroke();
   ctx.restore();
+}
+
+function distToSegment(
+  px: number,
+  py: number,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+): number {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const len2 = dx * dx + dy * dy;
+  const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / len2));
+  return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
 }
 
 // --- icons (16x16, inherit color via currentColor) ------------------------- #
@@ -116,12 +151,19 @@ export const DRAWING_TOOLS: ToolDef[] = [
     label: "Trend line (2 points)",
     anchors: 2,
     icon: iconTrend,
-    draw: ({ ctx, color, points }) => {
+    draw: ({ ctx, color, selected, points }) => {
       const [a, b] = points;
       if (!a || !b || a.x == null || a.y == null || b.x == null || b.y == null) return;
-      strokeLine(ctx, a.x, a.y, b.x, b.y, color);
-      drawHandle(ctx, a.x, a.y, color);
-      drawHandle(ctx, b.x, b.y, color);
+      strokeLine(ctx, a.x, a.y, b.x, b.y, color, selected);
+      if (selected) {
+        drawHandle(ctx, a.x, a.y, color);
+        drawHandle(ctx, b.x, b.y, color);
+      }
+    },
+    hitTest: ({ points, x, y }) => {
+      const [a, b] = points;
+      if (!a || !b || a.x == null || a.y == null || b.x == null || b.y == null) return false;
+      return distToSegment(x, y, a.x, a.y, b.x, b.y) <= HIT_THRESHOLD;
     },
   },
   {
@@ -129,10 +171,15 @@ export const DRAWING_TOOLS: ToolDef[] = [
     label: "Horizontal line",
     anchors: 1,
     icon: iconHorizontal,
-    draw: ({ ctx, width, color, points }) => {
+    draw: ({ ctx, width, color, selected, points }) => {
       const p = points[0];
       if (!p || p.y == null) return;
-      strokeLine(ctx, 0, p.y, width, p.y, color);
+      strokeLine(ctx, 0, p.y, width, p.y, color, selected);
+      if (selected) drawHandle(ctx, p.x ?? width / 2, p.y, color);
+    },
+    hitTest: ({ points, y }) => {
+      const p = points[0];
+      return p?.y != null && Math.abs(y - p.y) <= HIT_THRESHOLD;
     },
   },
   {
@@ -140,10 +187,15 @@ export const DRAWING_TOOLS: ToolDef[] = [
     label: "Vertical line",
     anchors: 1,
     icon: iconVertical,
-    draw: ({ ctx, height, color, points }) => {
+    draw: ({ ctx, height, color, selected, points }) => {
       const p = points[0];
       if (!p || p.x == null) return;
-      strokeLine(ctx, p.x, 0, p.x, height, color);
+      strokeLine(ctx, p.x, 0, p.x, height, color, selected);
+      if (selected) drawHandle(ctx, p.x, p.y ?? height / 2, color);
+    },
+    hitTest: ({ points, x }) => {
+      const p = points[0];
+      return p?.x != null && Math.abs(x - p.x) <= HIT_THRESHOLD;
     },
   },
 ];
@@ -151,5 +203,3 @@ export const DRAWING_TOOLS: ToolDef[] = [
 export const TOOL_MAP: Record<string, ToolDef> = Object.fromEntries(
   DRAWING_TOOLS.map((t) => [t.id, t]),
 );
-
-export const DEFAULT_DRAW_COLOR = "#3b82f6";

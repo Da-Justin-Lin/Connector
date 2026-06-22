@@ -90,6 +90,8 @@ export default function PriceChart({ symbol, initialRange = "1M", onLatest }: Pr
 
   const [activeTool, setActiveTool] = useState("cursor");
   const [drawings, setDrawings] = useState<Drawing[]>([]);
+  const [activeColor, setActiveColor] = useState(DEFAULT_DRAW_COLOR);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const chartHostRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -102,7 +104,39 @@ export default function PriceChart({ symbol, initialRange = "1M", onLatest }: Pr
   const primitiveRef = useRef<DrawingsPrimitive | null>(null);
   const activeToolRef = useRef(activeTool);
   activeToolRef.current = activeTool;
+  const activeColorRef = useRef(activeColor);
+  activeColorRef.current = activeColor;
+  const selectedIdRef = useRef(selectedId);
+  selectedIdRef.current = selectedId;
+  const symbolRef = useRef(symbol);
+  symbolRef.current = symbol;
   const pendingRef = useRef<DrawingPoint[]>([]);
+  const drawingsRef = useRef<Drawing[]>([]);
+  const dragRef = useRef<{
+    id: string;
+    anchorIndex: number | null;
+    lastX: number;
+    lastY: number;
+    moved: boolean;
+  } | null>(null);
+
+  const storageKey = (s: string) => `chart-drawings:${s.toUpperCase()}`;
+
+  // Single write path for drawings: updates React state, the primitive, the
+  // ref mirror, and localStorage (under the current symbol) in lockstep.
+  const commitDrawings = (updater: (prev: Drawing[]) => Drawing[]) => {
+    setDrawings((prev) => {
+      const next = updater(prev);
+      drawingsRef.current = next;
+      primitiveRef.current?.setDrawings(next);
+      try {
+        localStorage.setItem(storageKey(symbolRef.current), JSON.stringify(next));
+      } catch {
+        /* ignore quota / serialization errors */
+      }
+      return next;
+    });
+  };
 
   const emitLatest = (resp: CandlesResponse) => {
     const close = resp.candles.length > 0 ? resp.candles[resp.candles.length - 1].c : null;
@@ -195,12 +229,13 @@ export default function PriceChart({ symbol, initialRange = "1M", onLatest }: Pr
           id: `d${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           toolId: tool.id,
           points: next,
-          color: DEFAULT_DRAW_COLOR,
+          color: activeColorRef.current,
         };
         pendingRef.current = [];
         primitive.setPreview(null);
-        setDrawings((prev) => [...prev, drawing]);
+        commitDrawings((prev) => [...prev, drawing]);
         setActiveTool("cursor"); // revert to cursor after each completed drawing
+        setSelectedId(drawing.id); // select it so it can be recolored/moved
       } else {
         pendingRef.current = next;
       }
@@ -220,16 +255,87 @@ export default function PriceChart({ symbol, initialRange = "1M", onLatest }: Pr
         id: "preview",
         toolId: tool.id,
         points: [...pendingRef.current, pt],
-        color: DEFAULT_DRAW_COLOR,
+        color: activeColorRef.current,
       });
     };
 
     chart.subscribeClick(handleClick);
     chart.subscribeCrosshairMove(handleMove);
 
+    // --- select & drag (cursor tool only) ---------------------------------- #
+    const host = chartHostRef.current!; // non-null: the effect returned above if absent
+    const relative = (e: MouseEvent) => {
+      const rect = host.getBoundingClientRect();
+      return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    };
+
+    const onDown = (e: MouseEvent) => {
+      if (activeToolRef.current !== "cursor") return;
+      const { x, y } = relative(e);
+      const hit = primitive.pick(x, y);
+      if (!hit) {
+        setSelectedId(null);
+        return;
+      }
+      setSelectedId(hit.id);
+      const d = drawingsRef.current.find((dd) => dd.id === hit.id);
+      if (d) setActiveColor(d.color);
+      dragRef.current = { id: hit.id, anchorIndex: hit.anchorIndex, lastX: x, lastY: y, moved: false };
+      // Suspend chart pan/zoom while dragging a drawing.
+      chart.applyOptions({ handleScroll: false, handleScale: false });
+    };
+
+    const onMove = (e: MouseEvent) => {
+      const drag = dragRef.current;
+      if (!drag) return;
+      const { x, y } = relative(e);
+      const dx = x - drag.lastX;
+      const dy = y - drag.lastY;
+      drag.lastX = x;
+      drag.lastY = y;
+      drag.moved = true;
+      const ts = chart.timeScale();
+      commitDrawings((prev) =>
+        prev.map((d) => {
+          if (d.id !== drag.id) return d;
+          if (drag.anchorIndex != null) {
+            const price = series.coordinateToPrice(y);
+            const time = ts.coordinateToTime(x);
+            if (price == null || time == null) return d;
+            const points = d.points.slice();
+            points[drag.anchorIndex] = { time, price };
+            return { ...d, points };
+          }
+          // Body move: shift every anchor by the pixel delta, then re-project.
+          const points = d.points.map((p) => {
+            const px = ts.timeToCoordinate(p.time);
+            const py = series.priceToCoordinate(p.price);
+            if (px == null || py == null) return p;
+            const time = ts.coordinateToTime(px + dx);
+            const price = series.coordinateToPrice(py + dy);
+            return time == null || price == null ? p : { time, price };
+          });
+          return { ...d, points };
+        }),
+      );
+    };
+
+    const onUp = () => {
+      if (!dragRef.current) return;
+      dragRef.current = null;
+      chart.applyOptions({ handleScroll: true, handleScale: true });
+    };
+
+    host.addEventListener("mousedown", onDown, true);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+
     return () => {
       chart.unsubscribeClick(handleClick);
       chart.unsubscribeCrosshairMove(handleMove);
+      host.removeEventListener("mousedown", onDown, true);
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
       primitiveRef.current = null;
       chart.remove();
       chartRef.current = null;
@@ -237,29 +343,50 @@ export default function PriceChart({ symbol, initialRange = "1M", onLatest }: Pr
     };
   }, []);
 
-  // Push committed drawings into the primitive whenever they change.
+  // Mirror selection into the primitive so the selected drawing shows handles.
   useEffect(() => {
-    primitiveRef.current?.setDrawings(drawings);
-  }, [drawings]);
+    primitiveRef.current?.setSelected(selectedId);
+  }, [selectedId]);
 
-  // Reset drawings when the symbol changes (anchors are symbol-specific).
+  // Load this symbol's saved drawings (and reset transient state) on switch.
   useEffect(() => {
     pendingRef.current = [];
     primitiveRef.current?.setPreview(null);
-    setDrawings([]);
     setActiveTool("cursor");
+    setSelectedId(null);
+    let loaded: Drawing[] = [];
+    try {
+      const raw = localStorage.getItem(storageKey(symbol));
+      if (raw) loaded = JSON.parse(raw) as Drawing[];
+    } catch {
+      loaded = [];
+    }
+    drawingsRef.current = loaded;
+    setDrawings(loaded);
+    primitiveRef.current?.setDrawings(loaded);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbol]);
 
-  // Escape cancels an in-progress drawing and returns to the cursor.
+  // Escape cancels a pending drawing / deselects; Delete removes the selection.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      pendingRef.current = [];
-      primitiveRef.current?.setPreview(null);
-      setActiveTool("cursor");
+      const target = e.target as HTMLElement | null;
+      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      if (e.key === "Escape") {
+        pendingRef.current = [];
+        primitiveRef.current?.setPreview(null);
+        setActiveTool("cursor");
+        setSelectedId(null);
+      } else if ((e.key === "Delete" || e.key === "Backspace") && selectedIdRef.current) {
+        e.preventDefault();
+        const id = selectedIdRef.current;
+        setSelectedId(null);
+        commitDrawings((prev) => prev.filter((d) => d.id !== id));
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Re-theme the chart (text/grid/candle colors) when the theme flips.
@@ -292,11 +419,24 @@ export default function PriceChart({ symbol, initialRange = "1M", onLatest }: Pr
     }
   }, [data]);
 
-  const undoDrawing = () => setDrawings((prev) => prev.slice(0, -1));
+  const undoDrawing = () => commitDrawings((prev) => prev.slice(0, -1));
   const clearDrawings = () => {
     pendingRef.current = [];
     primitiveRef.current?.setPreview(null);
-    setDrawings([]);
+    setSelectedId(null);
+    commitDrawings(() => []);
+  };
+  const deleteSelected = () => {
+    const id = selectedIdRef.current;
+    if (!id) return;
+    setSelectedId(null);
+    commitDrawings((prev) => prev.filter((d) => d.id !== id));
+  };
+  // Set the color for new drawings; if one is selected, recolor it too.
+  const handleColorChange = (color: string) => {
+    setActiveColor(color);
+    const id = selectedIdRef.current;
+    if (id) commitDrawings((prev) => prev.map((d) => (d.id === id ? { ...d, color } : d)));
   };
 
   return (
@@ -340,7 +480,14 @@ export default function PriceChart({ symbol, initialRange = "1M", onLatest }: Pr
           <ChartToolbox
             tools={DRAWING_TOOLS}
             activeTool={activeTool}
-            onSelect={setActiveTool}
+            onSelect={(id) => {
+              setSelectedId(null);
+              setActiveTool(id);
+            }}
+            color={activeColor}
+            onColorChange={handleColorChange}
+            onDelete={deleteSelected}
+            hasSelection={selectedId !== null}
             onUndo={undoDrawing}
             onClear={clearDrawings}
             hasDrawings={drawings.length > 0}

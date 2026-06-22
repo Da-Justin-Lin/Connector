@@ -1,9 +1,13 @@
-import type { ToolDef } from "./drawingTools";
+import { PALETTE, type ToolDef } from "./drawingTools";
 
 interface ChartToolboxProps {
   tools: ToolDef[];
   activeTool: string;
   onSelect: (id: string) => void;
+  color: string;
+  onColorChange: (color: string) => void;
+  onDelete: () => void;
+  hasSelection: boolean;
   onUndo: () => void;
   onClear: () => void;
   hasDrawings: boolean;
@@ -22,6 +26,14 @@ const iconTrash = (
   </svg>
 );
 
+const iconDelete = (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+    <circle cx="8" cy="8" r="6" />
+    <line x1="5.5" y1="5.5" x2="10.5" y2="10.5" />
+    <line x1="10.5" y1="5.5" x2="5.5" y2="10.5" />
+  </svg>
+);
+
 /**
  * Floating drawing toolbar. Renders one button per registered tool plus the
  * shared edit actions; it is purely registry-driven, so new tools appear here
@@ -31,6 +43,10 @@ export default function ChartToolbox({
   tools,
   activeTool,
   onSelect,
+  color,
+  onColorChange,
+  onDelete,
+  hasSelection,
   onUndo,
   onClear,
   hasDrawings,
@@ -60,6 +76,37 @@ export default function ChartToolbox({
       })}
 
       <div className="my-0.5 h-px bg-line" />
+
+      {/* Color: sets the color for new drawings, or recolors the selected one. */}
+      <div className="grid grid-cols-2 gap-1 px-0.5 py-0.5">
+        {PALETTE.map((c) => (
+          <button
+            key={c}
+            type="button"
+            title={hasSelection ? "Recolor selection" : "Drawing color"}
+            aria-label={`Color ${c}`}
+            aria-pressed={color === c}
+            onClick={() => onColorChange(c)}
+            className={`tap h-4 w-4 rounded-full border transition-transform hover:scale-110 ${
+              color === c ? "border-content ring-1 ring-content" : "border-line"
+            }`}
+            style={{ backgroundColor: c }}
+          />
+        ))}
+      </div>
+
+      <div className="my-0.5 h-px bg-line" />
+
+      <button
+        type="button"
+        title="Delete selected drawing"
+        aria-label="Delete selected drawing"
+        onClick={onDelete}
+        disabled={!hasSelection}
+        className={`${btn} text-muted hover:bg-surface-2 hover:text-down disabled:opacity-30 disabled:hover:bg-transparent`}
+      >
+        {iconDelete}
+      </button>
 
       <button
         type="button"
