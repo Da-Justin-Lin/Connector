@@ -101,8 +101,12 @@ class PositionContext(BaseModel):
     week52_low: float | None = None
     pct_from_high: float | None = None  # negative = below the high
     pct_from_low: float | None = None
+    ma8: float | None = None
+    ma21: float | None = None
     ma50: float | None = None
     ma200: float | None = None
+    above_ma8: bool | None = None
+    above_ma21: bool | None = None
     above_ma50: bool | None = None
     above_ma200: bool | None = None
     # Earnings proximity
