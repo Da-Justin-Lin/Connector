@@ -1,3 +1,7 @@
+"use client";
+
+import { useState } from "react";
+
 import { PALETTE, type ToolDef } from "./drawingTools";
 
 interface ChartToolboxProps {
@@ -34,6 +38,19 @@ const iconDelete = (
   </svg>
 );
 
+// Collapsed-state handle (pencil) and the collapse chevron.
+const iconPencil = (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+    <path d="M11 2.5l2.5 2.5L6 12.5l-3 .5.5-3z" />
+  </svg>
+);
+
+const iconChevronUp = (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+    <path d="M4 10l4-4 4 4" />
+  </svg>
+);
+
 /**
  * Floating drawing toolbar. Renders one button per registered tool plus the
  * shared edit actions; it is purely registry-driven, so new tools appear here
@@ -51,11 +68,42 @@ export default function ChartToolbox({
   onClear,
   hasDrawings,
 }: ChartToolboxProps) {
+  const [expanded, setExpanded] = useState(false);
   const btn =
     "tap flex h-8 w-8 items-center justify-center rounded-md transition-colors";
 
+  // Collapsed: a single handle showing the active tool's icon. Click to expand.
+  if (!expanded) {
+    const activeIcon = tools.find((t) => t.id === activeTool)?.icon ?? iconPencil;
+    return (
+      <button
+        type="button"
+        title="Drawing tools"
+        aria-label="Show drawing tools"
+        aria-expanded={false}
+        onClick={() => setExpanded(true)}
+        className="tap flex h-8 w-8 items-center justify-center rounded-lg border border-line bg-surface/90 text-muted shadow-soft backdrop-blur transition-colors hover:text-content"
+      >
+        {activeIcon}
+      </button>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-0.5 rounded-lg border border-line bg-surface/90 p-1 shadow-soft backdrop-blur">
+      <button
+        type="button"
+        title="Collapse toolbar"
+        aria-label="Collapse toolbar"
+        aria-expanded
+        onClick={() => setExpanded(false)}
+        className={`${btn} text-muted hover:bg-surface-2 hover:text-content`}
+      >
+        {iconChevronUp}
+      </button>
+
+      <div className="my-0.5 h-px bg-line" />
+
       {tools.map((t) => {
         const active = activeTool === t.id;
         return (
