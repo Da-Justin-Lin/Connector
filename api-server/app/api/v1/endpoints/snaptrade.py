@@ -18,10 +18,17 @@ from app.schemas.investment_account import (
     HistoryResponse,
     HoldingRead,
     HoldingsResponse,
+    PositionContext,
     PositionDetailResponse,
     PositionTrade,
     ReturnsResponse,
     SyncAccountsResponse,
+)
+from app.services.market_data_service import fetch_candles, fetch_next_earnings, fetch_sectors
+from app.services.position_analytics import (
+    compute_concentration,
+    compute_trend_stats,
+    days_until,
 )
 from app.services.report_sync import ensure_holdings_cached
 from app.services.snaptrade_service import (
@@ -249,6 +256,8 @@ async def get_position_detail(
     account_uuids = [a.id for a in accounts]
 
     # Aggregate the current position across accounts from cached holdings.
+    # Also build a whole-book picture (every ticker's market value + cash) so we
+    # can size this position's concentration against the rest of the portfolio.
     qty = 0.0
     cost_basis = 0.0
     has_cost = False
@@ -256,10 +265,17 @@ async def get_position_detail(
     current_price: float | None = None
     name: str | None = None
     holding_accounts = 0
+    portfolio_value = 0.0
+    book_by_ticker: dict[str, float] = {}
     for account in accounts:
+        portfolio_value += _extract_cash(account.balance_cache or [])
         held_here = False
         for h in _holdings_from_cache(account.holdings_cache):
-            if normalize_instrument_key(h.ticker) != target:
+            portfolio_value += h.market_value
+            key = normalize_instrument_key(h.ticker)
+            if key:
+                book_by_ticker[key] = book_by_ticker.get(key, 0.0) + h.market_value
+            if key != target:
                 continue
             held_here = True
             qty += h.quantity
@@ -305,6 +321,40 @@ async def get_position_detail(
             if len(trades) >= 200:
                 break
 
+    # --- Pre-trade context: 52-week range/trend, earnings, concentration -----
+    # Market-data calls run concurrently and degrade to None on failure, so a
+    # slow or down upstream never blocks the (cache-backed) position summary.
+    sym = symbol.upper()
+    book_tickers = list(book_by_ticker.keys())
+    candles_res, earnings_res, sectors_res = await asyncio.gather(
+        fetch_candles(sym, "1Y"),
+        fetch_next_earnings(sym),
+        fetch_sectors(book_tickers),
+        return_exceptions=True,
+    )
+
+    context_data: dict = {}
+    if isinstance(candles_res, dict):
+        context_data.update(
+            compute_trend_stats(candles_res.get("candles", []), current_price)
+        )
+    if isinstance(earnings_res, str):
+        context_data["next_earnings_date"] = earnings_res
+        context_data["days_to_earnings"] = days_until(earnings_res)
+    if qty > 1e-9 and portfolio_value > 0:
+        sectors = sectors_res if isinstance(sectors_res, dict) else {}
+        target_sector = sectors.get(sym)
+        sector_value = (
+            sum(v for k, v in book_by_ticker.items() if sectors.get(k) == target_sector)
+            if target_sector else 0.0
+        )
+        context_data.update(
+            compute_concentration(
+                market_value, portfolio_value, target_sector, sector_value
+            )
+        )
+    context = PositionContext(**context_data) if context_data else None
+
     held = qty > 1e-9
     avg_cost = round(cost_basis / qty, 4) if has_cost and qty > 1e-9 else None
     unrealized = round(market_value - cost_basis, 2) if has_cost else None
@@ -327,6 +377,7 @@ async def get_position_detail(
         unrealized_pnl_pct=unrealized_pct,
         accounts=holding_accounts,
         trades=trades,
+        context=context,
     )
 
 
