@@ -6,12 +6,22 @@ import {
   createChart,
   type IChartApi,
   type ISeriesApi,
+  type MouseEventParams,
   type Time,
 } from "lightweight-charts";
 import { useEffect, useRef, useState } from "react";
 
 import { useThemeColors } from "@/hooks/useThemeColors";
 import api from "@/services/api";
+import ChartToolbox from "./chart/ChartToolbox";
+import { DrawingsPrimitive } from "./chart/DrawingsPrimitive";
+import {
+  DEFAULT_DRAW_COLOR,
+  DRAWING_TOOLS,
+  TOOL_MAP,
+  type Drawing,
+  type DrawingPoint,
+} from "./chart/drawingTools";
 
 export type Range = "1D" | "1W" | "1M" | "3M" | "1Y" | "5Y" | "MAX";
 
@@ -78,11 +88,21 @@ export default function PriceChart({ symbol, initialRange = "1M", onLatest }: Pr
   const [loading, setLoading] = useState(true);
   const c = useThemeColors();
 
+  const [activeTool, setActiveTool] = useState("cursor");
+  const [drawings, setDrawings] = useState<Drawing[]>([]);
+
   const chartHostRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const onLatestRef = useRef(onLatest);
   onLatestRef.current = onLatest;
+
+  // Drawing state machine lives in refs so the once-subscribed chart handlers
+  // always read the latest values without re-subscribing on every render.
+  const primitiveRef = useRef<DrawingsPrimitive | null>(null);
+  const activeToolRef = useRef(activeTool);
+  activeToolRef.current = activeTool;
+  const pendingRef = useRef<DrawingPoint[]>([]);
 
   const emitLatest = (resp: CandlesResponse) => {
     const close = resp.candles.length > 0 ? resp.candles[resp.candles.length - 1].c : null;
@@ -150,11 +170,96 @@ export default function PriceChart({ symbol, initialRange = "1M", onLatest }: Pr
     });
     chartRef.current = chart;
     seriesRef.current = series;
+
+    // Attach the drawings layer and the click/anchor state machine.
+    const primitive = new DrawingsPrimitive();
+    series.attachPrimitive(primitive);
+    primitiveRef.current = primitive;
+
+    const paramToPoint = (param: MouseEventParams): DrawingPoint | null => {
+      if (!param.point) return null;
+      const price = series.coordinateToPrice(param.point.y);
+      const time = param.time ?? chart.timeScale().coordinateToTime(param.point.x) ?? undefined;
+      if (price == null || time == null) return null;
+      return { time, price };
+    };
+
+    const handleClick = (param: MouseEventParams) => {
+      const tool = TOOL_MAP[activeToolRef.current];
+      if (!tool || tool.anchors === 0) return;
+      const pt = paramToPoint(param);
+      if (!pt) return;
+      const next = [...pendingRef.current, pt];
+      if (next.length >= tool.anchors) {
+        const drawing: Drawing = {
+          id: `d${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          toolId: tool.id,
+          points: next,
+          color: DEFAULT_DRAW_COLOR,
+        };
+        pendingRef.current = [];
+        primitive.setPreview(null);
+        setDrawings((prev) => [...prev, drawing]);
+        setActiveTool("cursor"); // revert to cursor after each completed drawing
+      } else {
+        pendingRef.current = next;
+      }
+    };
+
+    // Rubber-band the in-progress drawing under the crosshair.
+    const handleMove = (param: MouseEventParams) => {
+      if (pendingRef.current.length === 0) return;
+      const tool = TOOL_MAP[activeToolRef.current];
+      if (!tool) return;
+      const pt = paramToPoint(param);
+      if (!pt) {
+        primitive.setPreview(null);
+        return;
+      }
+      primitive.setPreview({
+        id: "preview",
+        toolId: tool.id,
+        points: [...pendingRef.current, pt],
+        color: DEFAULT_DRAW_COLOR,
+      });
+    };
+
+    chart.subscribeClick(handleClick);
+    chart.subscribeCrosshairMove(handleMove);
+
     return () => {
+      chart.unsubscribeClick(handleClick);
+      chart.unsubscribeCrosshairMove(handleMove);
+      primitiveRef.current = null;
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
     };
+  }, []);
+
+  // Push committed drawings into the primitive whenever they change.
+  useEffect(() => {
+    primitiveRef.current?.setDrawings(drawings);
+  }, [drawings]);
+
+  // Reset drawings when the symbol changes (anchors are symbol-specific).
+  useEffect(() => {
+    pendingRef.current = [];
+    primitiveRef.current?.setPreview(null);
+    setDrawings([]);
+    setActiveTool("cursor");
+  }, [symbol]);
+
+  // Escape cancels an in-progress drawing and returns to the cursor.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      pendingRef.current = [];
+      primitiveRef.current?.setPreview(null);
+      setActiveTool("cursor");
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
 
   // Re-theme the chart (text/grid/candle colors) when the theme flips.
@@ -186,6 +291,13 @@ export default function PriceChart({ symbol, initialRange = "1M", onLatest }: Pr
       chartRef.current?.timeScale().fitContent();
     }
   }, [data]);
+
+  const undoDrawing = () => setDrawings((prev) => prev.slice(0, -1));
+  const clearDrawings = () => {
+    pendingRef.current = [];
+    primitiveRef.current?.setPreview(null);
+    setDrawings([]);
+  };
 
   return (
     <div className="flex h-full flex-col">
@@ -224,6 +336,16 @@ export default function PriceChart({ symbol, initialRange = "1M", onLatest }: Pr
       </div>
       <div className="relative mt-2 flex-1">
         <div ref={chartHostRef} className="absolute inset-0" />
+        <div className="absolute left-2 top-2 z-10">
+          <ChartToolbox
+            tools={DRAWING_TOOLS}
+            activeTool={activeTool}
+            onSelect={setActiveTool}
+            onUndo={undoDrawing}
+            onClear={clearDrawings}
+            hasDrawings={drawings.length > 0}
+          />
+        </div>
         {loading && (
           <div className="absolute inset-0 flex items-center justify-center bg-surface/70 text-sm text-faint">
             Loading…
