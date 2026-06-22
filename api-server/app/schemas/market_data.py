@@ -16,6 +16,9 @@ class CandlesResponse(BaseModel):
     candles: list[Candle]
     available: bool
     message: str | None = None
+    # yfinance interval actually rendered (e.g. "5m", "30m", "1d", "1wk"),
+    # which may differ from the request when an invalid combo was clamped.
+    interval: str | None = None
 
 
 class Snapshot(BaseModel):
