@@ -3,6 +3,7 @@
 import {
   CandlestickSeries,
   ColorType,
+  CrosshairMode,
   HistogramSeries,
   LineSeries,
   createChart,
@@ -234,6 +235,9 @@ export default function PriceChart({ symbol, initialRange = "1M", onLatest }: Pr
       },
       rightPriceScale: { borderVisible: false },
       timeScale: { borderVisible: false, timeVisible: true, secondsVisible: false },
+      // Free crosshair: the horizontal line follows the mouse vertically
+      // instead of snapping to the candle's close.
+      crosshair: { mode: CrosshairMode.Normal },
       autoSize: true,
     });
     const series = chart.addSeries(CandlestickSeries, {

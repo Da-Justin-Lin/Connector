@@ -45,7 +45,7 @@ class DrawingsPaneView implements IPrimitivePaneView {
             if (!tool?.draw) continue;
             const points: PixelPoint[] = d.points.map((p) => this._source.toPixels(p));
             const selected = this._source.isSelected(d.id);
-            tool.draw({ ctx, width, height, color: d.color, selected, points });
+            tool.draw({ ctx, width, height, color: d.color, selected, points, anchors: d.points });
           }
         });
       },

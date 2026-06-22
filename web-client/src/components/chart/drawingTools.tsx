@@ -30,6 +30,9 @@ export interface ToolDrawArgs {
   /** True for the selected drawing (and the in-progress preview): show handles. */
   selected: boolean;
   points: PixelPoint[];
+  /** The drawing's anchors in chart space (time + price), for tools that need
+   *  the underlying values — e.g. Measure showing the % price change. */
+  anchors: DrawingPoint[];
 }
 
 export interface ToolHitArgs {
@@ -145,6 +148,14 @@ const iconVertical = (
   </svg>
 );
 
+const iconMeasure = (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+    <rect x="2.5" y="2.5" width="11" height="11" rx="1" strokeDasharray="2 1.5" />
+    <path d="M4.5 11.5l7-7" />
+    <path d="M9 4.5h2.5V7" />
+  </svg>
+);
+
 // --- the registry ---------------------------------------------------------- #
 
 export const DRAWING_TOOLS: ToolDef[] = [
@@ -201,6 +212,93 @@ export const DRAWING_TOOLS: ToolDef[] = [
     hitTest: ({ points, x }) => {
       const p = points[0];
       return p?.x != null && Math.abs(x - p.x) <= HIT_THRESHOLD;
+    },
+  },
+  {
+    id: "measure",
+    label: "Measure (% change)",
+    anchors: 2,
+    icon: iconMeasure,
+    editFields: ["price"],
+    draw: ({ ctx, selected, points, anchors }) => {
+      const [a, b] = points;
+      if (!a || !b || a.x == null || a.y == null || b.x == null || b.y == null) return;
+      const x = Math.min(a.x, b.x);
+      const y = Math.min(a.y, b.y);
+      const w = Math.abs(b.x - a.x);
+      const h = Math.abs(b.y - a.y);
+      const p0 = anchors[0]?.price;
+      const p1 = anchors[1]?.price;
+      const up = (p1 ?? 0) >= (p0 ?? 0);
+      const lineCol = up ? "#10b981" : "#ef4444";
+      const fillCol = up ? "rgba(16,185,129,0.16)" : "rgba(239,68,68,0.16)";
+      const meshCol = up ? "rgba(16,185,129,0.30)" : "rgba(239,68,68,0.30)";
+
+      ctx.save();
+      ctx.fillStyle = fillCol;
+      ctx.fillRect(x, y, w, h);
+
+      // Mesh: a light internal grid.
+      ctx.strokeStyle = meshCol;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      const divs = 4;
+      for (let i = 1; i < divs; i++) {
+        const gx = x + (w * i) / divs;
+        ctx.moveTo(gx, y);
+        ctx.lineTo(gx, y + h);
+        const gy = y + (h * i) / divs;
+        ctx.moveTo(x, gy);
+        ctx.lineTo(x + w, gy);
+      }
+      ctx.stroke();
+
+      ctx.strokeStyle = lineCol;
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(x, y, w, h);
+
+      if (selected) {
+        drawHandle(ctx, a.x, a.y, lineCol);
+        drawHandle(ctx, b.x, b.y, lineCol);
+      }
+
+      // Label: percentage price change (and absolute) of the box.
+      if (p0 != null && p1 != null && p0 !== 0) {
+        const pct = ((p1 - p0) / Math.abs(p0)) * 100;
+        const diff = p1 - p0;
+        const text = `${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%   ${diff >= 0 ? "+" : ""}${diff.toFixed(2)}`;
+        ctx.font = "600 12px ui-sans-serif, system-ui, sans-serif";
+        ctx.textBaseline = "middle";
+        ctx.textAlign = "left";
+        const padX = 6;
+        const bw = ctx.measureText(text).width + padX * 2;
+        const bh = 20;
+        const bx = x + w / 2 - bw / 2;
+        const by = up ? y - bh - 4 : y + h + 4;
+        const r = 4;
+        ctx.fillStyle = lineCol;
+        ctx.beginPath();
+        ctx.moveTo(bx + r, by);
+        ctx.arcTo(bx + bw, by, bx + bw, by + bh, r);
+        ctx.arcTo(bx + bw, by + bh, bx, by + bh, r);
+        ctx.arcTo(bx, by + bh, bx, by, r);
+        ctx.arcTo(bx, by, bx + bw, by, r);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = "#ffffff";
+        ctx.fillText(text, bx + padX, by + bh / 2 + 0.5);
+      }
+      ctx.restore();
+    },
+    hitTest: ({ points, x, y }) => {
+      const [a, b] = points;
+      if (!a || !b || a.x == null || a.y == null || b.x == null || b.y == null) return false;
+      return (
+        x >= Math.min(a.x, b.x) &&
+        x <= Math.max(a.x, b.x) &&
+        y >= Math.min(a.y, b.y) &&
+        y <= Math.max(a.y, b.y)
+      );
     },
   },
 ];
