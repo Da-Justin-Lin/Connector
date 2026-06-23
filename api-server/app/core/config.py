@@ -14,7 +14,7 @@ class Settings(BaseSettings):
 
     secret_key: str = "changeme"
     algorithm: str = "HS256"
-    access_token_expire_minutes: int = 30
+    access_token_expire_minutes: int = 43200  # 30 days — keeps logins remembered
 
     # Comma-separated list of allowed CORS origins
     allowed_origins: str = "http://localhost:3000"
