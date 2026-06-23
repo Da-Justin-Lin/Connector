@@ -19,9 +19,13 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 30
     # Long-lived, revocable refresh token (stored hashed in the DB).
     refresh_token_expire_days: int = 30
-    # Send the refresh cookie only over HTTPS. Keep False for local http dev;
-    # set COOKIE_SECURE=true in production.
+    # Refresh-cookie delivery. Local http dev: samesite=lax, secure=false.
+    # Cross-site production (frontend and API on different domains): the cookie
+    # is only sent on cross-site requests when samesite=none, which in turn
+    # requires secure=true (HTTPS). So in prod set COOKIE_SAMESITE=none and
+    # COOKIE_SECURE=true.
     cookie_secure: bool = False
+    cookie_samesite: str = "lax"
 
     # Comma-separated list of allowed CORS origins
     allowed_origins: str = "http://localhost:3000"
