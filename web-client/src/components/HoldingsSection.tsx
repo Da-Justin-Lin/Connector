@@ -1,10 +1,12 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 import AnimatedNumber from "@/components/AnimatedNumber";
 import { useCachedResource } from "@/hooks/useCachedResource";
+import api from "@/services/api";
 
 interface Holding {
   ticker: string | null;
@@ -60,14 +62,41 @@ function StatCard({
 function AccountCard({
   section,
   onSelectSymbol,
+  onRemoved,
 }: {
   section: AccountSection;
   onSelectSymbol: (ticker: string) => void;
+  onRemoved: () => void;
 }) {
   const title =
     section.institution_name || section.account_name || "Brokerage Account";
   const subtitle =
     section.account_name && section.institution_name ? section.account_name : null;
+  const [removing, setRemoving] = useState(false);
+
+  const handleRemove = async () => {
+    const label = subtitle ? `${title} — ${subtitle}` : title;
+    if (
+      !window.confirm(
+        `Permanently disconnect "${label}"?\n\n` +
+          "This removes the brokerage connection from SnapTrade and deletes this " +
+          "account's holdings, orders, and deposits. Other accounts on the same " +
+          "connection may be disconnected too. This can't be undone.",
+      )
+    ) {
+      return;
+    }
+    setRemoving(true);
+    try {
+      await api.delete(
+        `/api/v1/snaptrade/accounts/${encodeURIComponent(section.snaptrade_account_id)}`,
+      );
+      onRemoved();
+    } catch {
+      window.alert("Couldn't disconnect that account. Please try again.");
+      setRemoving(false);
+    }
+  };
 
   return (
     <div className="overflow-hidden card">
@@ -76,7 +105,7 @@ function AccountCard({
           <p className="text-base font-semibold text-content">{title}</p>
           {subtitle && <p className="text-xs text-muted">{subtitle}</p>}
         </div>
-        <div className="flex gap-6 text-right text-sm">
+        <div className="flex items-center gap-6 text-right text-sm">
           <div>
             <p className="text-xs text-muted">Cash</p>
             <p className="num font-medium text-content">${fmt(section.cash)}</p>
@@ -89,6 +118,14 @@ function AccountCard({
             <p className="text-xs text-muted">Total</p>
             <p className="num font-semibold text-content">${fmt(section.total_value)}</p>
           </div>
+          <button
+            onClick={handleRemove}
+            disabled={removing}
+            title="Permanently disconnect this account"
+            className="tap rounded-lg border border-line px-2.5 py-1.5 text-xs font-medium text-muted transition-colors hover:border-down hover:text-down disabled:opacity-50"
+          >
+            {removing ? "Removing…" : "Remove"}
+          </button>
         </div>
       </div>
 
@@ -212,6 +249,7 @@ export default function HoldingsSection({ accountId = null }: HoldingsSectionPro
               onSelectSymbol={(symbol) =>
                 router.push(`/dashboard/positions/${encodeURIComponent(symbol)}`)
               }
+              onRemoved={() => window.location.reload()}
             />
           ))}
         </div>

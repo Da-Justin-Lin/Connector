@@ -36,7 +36,9 @@ from app.services.snaptrade_service import (
     fetch_account_balance,
     fetch_balance_history_async,
     fetch_return_rates,
+    find_account_authorization,
     list_accounts,
+    remove_brokerage_authorization,
 )
 from app.services.trade_parsing import normalize_instrument_key, parse_order
 
@@ -104,6 +106,48 @@ async def sync_accounts(
 
     await db.commit()
     return SyncAccountsResponse(accounts_synced=synced)
+
+
+@router.delete("/accounts/{account_id}", status_code=204)
+async def delete_account(
+    account_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Permanently disconnect a brokerage account.
+
+    Removes the SnapTrade connection so it can't re-sync, then deletes the local
+    account and its cached data (orders + deposits cascade at the DB level).
+    """
+    row = (
+        await db.execute(
+            select(InvestmentAccount).where(
+                InvestmentAccount.user_id == current_user.id,
+                InvestmentAccount.snaptrade_account_id == account_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    # Drop the SnapTrade connection first. If this fails we keep the local row
+    # so the account isn't silently re-added on the next sync. A missing
+    # authorization (already disconnected) is fine — fall through to local delete.
+    try:
+        authorization_id = await asyncio.to_thread(
+            find_account_authorization, account_id
+        )
+        if authorization_id:
+            await asyncio.to_thread(
+                remove_brokerage_authorization, authorization_id
+            )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502, detail=f"SnapTrade error: {exc}"
+        ) from exc
+
+    await db.delete(row)
+    await db.commit()
 
 
 def _extract_cash(balance_payload: dict | list) -> float:

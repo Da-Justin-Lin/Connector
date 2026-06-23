@@ -38,6 +38,36 @@ def list_accounts() -> list[dict]:
     return list(response.body or [])
 
 
+def find_account_authorization(account_id: str) -> str | None:
+    """Return the brokerage-authorization (connection) id for a given account,
+    or None if SnapTrade no longer reports the account (already disconnected)."""
+    for acct in list_accounts():
+        if acct.get("id") != account_id:
+            continue
+        ba = acct.get("brokerage_authorization")
+        if isinstance(ba, dict):
+            return ba.get("id")
+        if isinstance(ba, str):
+            return ba
+        return None
+    return None
+
+
+def remove_brokerage_authorization(authorization_id: str) -> None:
+    """Permanently remove a brokerage connection from SnapTrade.
+
+    After this the account stops appearing in `list_accounts()`, so a later
+    sync won't re-create it. Note: every account under this authorization is
+    disconnected together.
+    """
+    user_id, user_secret = _creds()
+    _client().connections.remove_brokerage_authorization(
+        authorization_id=authorization_id,
+        user_id=user_id,
+        user_secret=user_secret,
+    )
+
+
 def fetch_account_positions(account_id: str) -> dict:
     """Fetch positions (holdings + cash) for a single brokerage account."""
     user_id, user_secret = _creds()
