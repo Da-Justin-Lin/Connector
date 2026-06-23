@@ -1,17 +1,23 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect } from "react";
 
-import { refreshSession } from "@/services/authService";
+import { storeToken } from "@/services/authService";
 
 function CallbackHandler() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   useEffect(() => {
-    // Google's callback set the refresh cookie; exchange it for an access token.
-    refreshSession().then((ok) => router.replace(ok ? "/dashboard" : "/login"));
-  }, [router]);
+    const token = searchParams.get("token");
+    if (token) {
+      storeToken(token);
+      router.replace("/dashboard");
+    } else {
+      router.replace("/login");
+    }
+  }, [router, searchParams]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-surface-2">
