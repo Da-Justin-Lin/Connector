@@ -81,6 +81,37 @@ def _current_portfolio_value_from_cache(accounts) -> float:
     return round(total, 2)
 
 
+# A gap larger than this between consecutive snapshots marks a session boundary
+# (snapshots only fire during market hours, so overnight/weekend gaps are hours
+# long while intraday snapshots are 5 min apart).
+_SESSION_GAP = timedelta(hours=2)
+
+
+def _previous_close_value(snapshots) -> float | None:
+    """Baseline for the 1D change: the portfolio value at the previous session's
+    close.
+
+    `snapshots` is an ascending list of PortfolioSnapshot rows. We find where the
+    current session begins (the last large time-gap) and take the snapshot right
+    before it. With only one session present (e.g. the very first trading day),
+    we fall back to that session's opening value.
+    """
+    snaps = [(s.snapshot_at, float(s.total_value)) for s in snapshots]
+    if not snaps:
+        return None
+
+    session_start = 0
+    for i in range(len(snaps) - 1, 0, -1):
+        if snaps[i][0] - snaps[i - 1][0] > _SESSION_GAP:
+            session_start = i
+            break
+
+    if session_start == 0:
+        # No prior session captured yet — anchor to today's open.
+        return snaps[0][1]
+    return snaps[session_start - 1][1]
+
+
 @router.get("/portfolio-returns", response_model=PortfolioReturns)
 async def get_portfolio_returns(
     background: BackgroundTasks,
@@ -120,26 +151,24 @@ async def get_portfolio_returns(
         round(all_time_return / total_principal, 6) if total_principal > 0 else 0.0
     )
 
-    # 3. 1D change — compares to earliest snapshot in last 24h.
+    # 3. 1D change — current value vs the previous session's close.
     # Snapshots are aggregated across all accounts (we don't snapshot per-account),
-    # so the 1D number for a filtered view is approximate.
+    # so the 1D number is only shown for the unfiltered "All accounts" view.
     now = datetime.now(timezone.utc)
     day_change: float | None = None
     day_change_pct: float | None = None
-    snap_row = await db.execute(
+    snap_rows = await db.execute(
         select(PortfolioSnapshot)
         .where(
             PortfolioSnapshot.user_id == current_user.id,
-            PortfolioSnapshot.snapshot_at >= now - timedelta(hours=24),
+            PortfolioSnapshot.snapshot_at >= now - timedelta(days=6),
         )
         .order_by(PortfolioSnapshot.snapshot_at.asc())
-        .limit(1)
     )
-    earliest_today = snap_row.scalar_one_or_none()
-    if earliest_today and current_value and not account_id:
-        start_val = float(earliest_today.total_value)
-        day_change = round(current_value - start_val, 2)
-        day_change_pct = round(day_change / start_val, 6) if start_val else None
+    prev_close = _previous_close_value(snap_rows.scalars().all())
+    if prev_close and current_value and not account_id:
+        day_change = round(current_value - prev_close, 2)
+        day_change_pct = round(day_change / prev_close, 6) if prev_close else None
 
     # 4. YTD — deposits-adjusted
     year_start = datetime(now.year, 1, 1, tzinfo=timezone.utc)

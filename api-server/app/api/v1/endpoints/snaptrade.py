@@ -462,7 +462,6 @@ async def get_history(
     if not accounts:
         return HistoryResponse(series=[], available=True, message=None)
 
-    aggregated: dict[str, float] = {}
     any_success = False
     last_error: str | None = None
 
@@ -474,6 +473,10 @@ async def get_history(
         ),
         return_exceptions=True,
     )
+    # Build a per-account {date: value} series first. Accounts post their daily
+    # balance at different times, so on the most recent date(s) some accounts have
+    # no row yet — summing by raw date would drop them and understate the total.
+    per_account_series: list[dict[str, float]] = []
     for payload in payloads:
         if isinstance(payload, Exception):
             last_error = str(payload)
@@ -486,12 +489,28 @@ async def get_history(
         elif isinstance(payload, dict):
             rows = payload.get("results") or payload.get("history") or []
 
+        series: dict[str, float] = {}
         for row in rows:
             parsed = _normalize_history_entry(row)
             if parsed is None:
                 continue
             date_str, value = parsed
-            aggregated[date_str] = aggregated.get(date_str, 0.0) + value
+            series[date_str] = value
+        if series:
+            per_account_series.append(series)
+
+    # Sum across accounts on the union of dates, carrying each account's
+    # last-known value forward so a missing latest row never zeroes an account
+    # out of the total ("All accounts" stays the true sum of its accounts).
+    all_dates = sorted({d for s in per_account_series for d in s})
+    aggregated: dict[str, float] = {}
+    for series in per_account_series:
+        last_val: float | None = None
+        for d in all_dates:
+            if d in series:
+                last_val = series[d]
+            if last_val is not None:
+                aggregated[d] = aggregated.get(d, 0.0) + last_val
 
     if not any_success and last_error:
         return HistoryResponse(
