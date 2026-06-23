@@ -14,18 +14,7 @@ class Settings(BaseSettings):
 
     secret_key: str = "changeme"
     algorithm: str = "HS256"
-    # Short-lived access token; the frontend silently refreshes it via the
-    # long-lived refresh-token cookie, so sessions still feel "remembered".
-    access_token_expire_minutes: int = 30
-    # Long-lived, revocable refresh token (stored hashed in the DB).
-    refresh_token_expire_days: int = 30
-    # Refresh-cookie delivery. Local http dev: samesite=lax, secure=false.
-    # Cross-site production (frontend and API on different domains): the cookie
-    # is only sent on cross-site requests when samesite=none, which in turn
-    # requires secure=true (HTTPS). So in prod set COOKIE_SAMESITE=none and
-    # COOKIE_SECURE=true.
-    cookie_secure: bool = False
-    cookie_samesite: str = "lax"
+    access_token_expire_minutes: int = 43200  # 30 days — keeps logins remembered
 
     # Comma-separated list of allowed CORS origins
     allowed_origins: str = "http://localhost:3000"

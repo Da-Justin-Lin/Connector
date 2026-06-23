@@ -4,7 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import Navbar from "@/components/Navbar";
-import { isLoggedIn, refreshSession } from "@/services/authService";
+import { isLoggedIn } from "@/services/authService";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -12,20 +12,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    let active = true;
-    (async () => {
-      // Fast path: we already hold an access token. Otherwise try the refresh
-      // cookie so a returning user with a valid 30-day session stays logged in
-      // even after the short-lived access token has expired.
-      if (isLoggedIn() || (await refreshSession())) {
-        if (active) setChecking(false);
-      } else if (active) {
-        router.replace("/login");
-      }
-    })();
-    return () => {
-      active = false;
-    };
+    if (!isLoggedIn()) {
+      router.replace("/login");
+    } else {
+      setChecking(false);
+    }
   }, [router]);
 
   if (checking) return null;
