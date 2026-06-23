@@ -9,6 +9,7 @@ from app.models.base import Base
 import app.models.user  # noqa: F401
 import app.models.investment_account  # noqa: F401
 import app.models.broker_order  # noqa: F401
+import app.models.refresh_token  # noqa: F401
 
 config = context.config
 
