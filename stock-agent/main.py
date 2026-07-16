@@ -15,9 +15,12 @@ import sys
 import time
 from datetime import datetime
 
-from dotenv import load_dotenv
-
-load_dotenv()
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    # dotenv is only needed for local .env files; Railway provides env vars directly.
+    pass
 
 # Anthropic key is only required when LLM veto is enabled.
 _skip_llm = os.environ.get("SKIP_LLM_VETO", "").lower() == "true"

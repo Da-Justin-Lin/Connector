@@ -15,9 +15,13 @@ watchlist, or Anthropic API — just exercises the SMTP path with a fake signal.
 import os
 import sys
 
-from dotenv import load_dotenv
-
-load_dotenv()
+# dotenv is only needed for local .env files. On Railway the env vars are
+# already in os.environ, so skip if the package isn't available.
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 from notifier import _email_cfg, _smtp_send  # noqa: E402
 from email.mime.text import MIMEText  # noqa: E402
