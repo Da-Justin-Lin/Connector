@@ -3,11 +3,44 @@ Sends alerts to Google Chat webhook and/or email.
 Both are optional — if the env vars aren't set, that channel is silently skipped.
 """
 
+import contextlib
 import os
 import smtplib
+import socket
 import requests
 from email.mime.text import MIMEText
 from datetime import datetime
+
+
+# ---------- IPv4-only SMTP fix ----------
+# Railway (and many container platforms) give the container IPv4 connectivity only,
+# but smtp.gmail.com has AAAA records so Python resolves it to IPv6 first and
+# fails with ENETUNREACH. Force AF_INET resolution for the duration of the SMTP
+# call so it stays on IPv4 while the SSL cert is still validated against
+# "smtp.gmail.com".
+
+_orig_getaddrinfo = socket.getaddrinfo
+
+
+def _ipv4_only(host, port, family=0, type=0, proto=0, flags=0):
+    return _orig_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
+
+
+@contextlib.contextmanager
+def _force_ipv4():
+    socket.getaddrinfo = _ipv4_only
+    try:
+        yield
+    finally:
+        socket.getaddrinfo = _orig_getaddrinfo
+
+
+def _smtp_send(cfg: dict, msg: MIMEText) -> None:
+    """Send an already-composed MIMEText message via Gmail SMTP over IPv4."""
+    with _force_ipv4():
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as smtp:
+            smtp.login(cfg["from"], cfg["password"])
+            smtp.send_message(msg)
 
 
 def _gchat_webhook() -> str | None:
@@ -167,9 +200,7 @@ def send_exit(alert) -> None:
             msg["Subject"] = subject
             msg["From"] = cfg["from"]
             msg["To"] = cfg["to"]
-            with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
-                smtp.login(cfg["from"], cfg["password"])
-                smtp.send_message(msg)
+            _smtp_send(cfg, msg)
         except Exception as e:
             print(f"[notifier] Exit-email failed: {e}")
 
@@ -197,8 +228,6 @@ def _send_email(signal: dict) -> None:
         msg["Subject"] = subject
         msg["From"] = cfg["from"]
         msg["To"] = cfg["to"]
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
-            smtp.login(cfg["from"], cfg["password"])
-            smtp.send_message(msg)
+        _smtp_send(cfg, msg)
     except Exception as e:
         print(f"[notifier] Email failed: {e}")
