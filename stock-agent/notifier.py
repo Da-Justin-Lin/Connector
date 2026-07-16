@@ -106,6 +106,74 @@ def send(signal: dict) -> None:
     _send_email(signal)
 
 
+# ---------- Exit alerts (position management) ----------
+
+
+_URGENCY_ICON = {"IMMEDIATE": "🚨", "IMPORTANT": "⚠️", "ADVISORY": "💡"}
+
+
+def _format_exit_gchat(alert) -> str:
+    icon = _URGENCY_ICON.get(alert.urgency, "🔔")
+    shares_str = f"{alert.shares:.4f}".rstrip("0").rstrip(".")
+    lines = [
+        f"{icon} *{alert.alert_type}* — *{alert.ticker}* [{alert.urgency}]",
+        alert.message,
+        f"Held: {alert.days_held}d  |  {shares_str} shares  |  Entry ${alert.entry_price:.2f}  →  Now ${alert.current_price:.2f}",
+        f"Unrealized P&L: *${alert.unrealized_pnl:+,.2f}* ({alert.unrealized_pnl_pct:+.2f}%)",
+        f"Current stop: ${alert.current_stop:.2f}  |  Target: ${alert.target:.2f}",
+    ]
+    return "\n".join(lines)
+
+
+def _format_exit_email(alert) -> tuple[str, str]:
+    subject = f"[Stock Agent] {alert.alert_type} — {alert.ticker} ({alert.urgency})"
+    shares_str = f"{alert.shares:.4f}".rstrip("0").rstrip(".")
+    body = "\n".join([
+        f"POSITION ALERT — {alert.ticker}",
+        f"Type       : {alert.alert_type}",
+        f"Urgency    : {alert.urgency}",
+        f"",
+        alert.message,
+        f"",
+        f"Shares         : {shares_str}",
+        f"Entry price    : ${alert.entry_price:.2f}",
+        f"Current price  : ${alert.current_price:.2f}",
+        f"Days held      : {alert.days_held}",
+        f"Unrealized P&L : ${alert.unrealized_pnl:+.2f} ({alert.unrealized_pnl_pct:+.2f}%)",
+        f"Current stop   : ${alert.current_stop:.2f}",
+        f"Target         : ${alert.target:.2f}",
+        f"",
+        f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S ET')}",
+    ])
+    return subject, body
+
+
+def send_exit(alert) -> None:
+    """Send a position-exit alert to all configured channels."""
+    url = _gchat_webhook()
+    if url:
+        try:
+            resp = requests.post(url, json={"text": _format_exit_gchat(alert)}, timeout=10)
+            if resp.status_code != 200:
+                print(f"[notifier] Exit-GChat error {resp.status_code}: {resp.text[:200]}")
+        except Exception as e:
+            print(f"[notifier] Exit-GChat failed: {e}")
+
+    cfg = _email_cfg()
+    if cfg:
+        try:
+            subject, body = _format_exit_email(alert)
+            msg = MIMEText(body)
+            msg["Subject"] = subject
+            msg["From"] = cfg["from"]
+            msg["To"] = cfg["to"]
+            with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+                smtp.login(cfg["from"], cfg["password"])
+                smtp.send_message(msg)
+        except Exception as e:
+            print(f"[notifier] Exit-email failed: {e}")
+
+
 def _send_gchat(signal: dict) -> None:
     url = _gchat_webhook()
     if not url:

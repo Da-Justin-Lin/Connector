@@ -129,6 +129,39 @@ Set these environment variables in the Railway dashboard:
 4. **Month 4+**: `FULL_AUTO` — only after 30+ approved trades with real P&L
    matching backtest expectations.
 
+## Position tracking (exit alerts)
+
+Once you take a signal and buy on Robinhood, register the position so the
+agent starts monitoring exit conditions:
+
+```bash
+python manage_positions.py add ORCL 0.7474 132.53 119.15 187.27
+#                              ticker shares  entry  stop   target
+```
+
+Each scan cycle then checks every open position for:
+
+| Alert | Trigger |
+|-------|---------|
+| `HARD_STOP` | Price ≤ current stop |
+| `TARGET_HIT` | Price ≥ target |
+| `TRAIL_RAISED` | Reached +1R/+2R/+3R — new suggested stop level |
+| `THESIS_BROKEN` | Rules engine no longer says BUY for this ticker |
+| `TIME_STOP` | Held ≥ 10 trading days with < 50% target progress |
+| `REGIME_SHIFT` | Market flipped to BEAR/PANIC |
+
+Other CLI commands:
+
+```bash
+python manage_positions.py list                # show all open
+python manage_positions.py show ORCL           # detailed status + active alerts
+python manage_positions.py close ORCL 145.20   # record exit
+python manage_positions.py stop ORCL 133.00    # override current stop
+```
+
+On Railway, set `POSITIONS_JSON` env var to the JSON array of positions
+(overrides the local file — same schema as `positions.json`).
+
 ## Safety rails baked in
 
 - **Regime filter**: no new longs in BEAR/PANIC market
@@ -151,6 +184,8 @@ Set these environment variables in the Railway dashboard:
 | `risk_manager.py` | Position sizing + circuit breakers, state in `risk_state.json` |
 | `analyzer.py` | Regime → rules → risk → LLM veto pipeline |
 | `robinhood_broker.py` | Robinhood Agentic MCP client |
+| `positions.py` | Position tracking + 6 types of exit alerts |
+| `manage_positions.py` | CLI to add/close/list/show positions |
 | `notifier.py` | GChat + email push |
 | `alerter.py` | Console output + log file |
 | `backtest.py` | Historical simulation with metrics |

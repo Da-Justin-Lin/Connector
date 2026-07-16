@@ -36,6 +36,8 @@ from analyzer import analyze
 from alerter import display, display_hold, display_scan_header, should_alert
 from risk_manager import get_status as risk_status, record_entry
 import robinhood_broker
+import positions as pos_module
+import notifier
 
 init(autoreset=True)
 
@@ -88,6 +90,24 @@ def _place_order_if_needed(signal: dict) -> None:
         signal["order_status"] = f"[{result.mode}] ORDER FAILED: {result.message}"
 
 
+def _run_exit_scan() -> None:
+    """Check every open position for exit triggers; email each alert."""
+    open_positions = pos_module.load_positions()
+    if not open_positions:
+        return
+
+    print(f"\n  {Fore.CYAN}--- Position exit scan ({len(open_positions)} open) ---{Style.RESET_ALL}")
+    for pos in open_positions:
+        alerts = pos_module.evaluate_position(pos)
+        if not alerts:
+            print(f"  {pos.ticker}: healthy")
+            continue
+        for a in alerts:
+            color = {"IMMEDIATE": Fore.RED, "IMPORTANT": Fore.YELLOW, "ADVISORY": Fore.CYAN}.get(a.urgency, Fore.WHITE)
+            print(f"  {color}[{a.urgency}] {a.alert_type} — {a.ticker}: {a.message}{Style.RESET_ALL}")
+            notifier.send_exit(a)
+
+
 def run_scan(tickers: list[str]) -> None:
     display_scan_header(tickers)
     status = risk_status()
@@ -105,6 +125,10 @@ def run_scan(tickers: list[str]) -> None:
         print(f"  {Fore.RED}⛔ MAX DRAWDOWN BREACHED — trading halted{Style.RESET_ALL}")
         return
 
+    # Step 1: exit-scan open positions FIRST (freeing capital / warning of stops)
+    _run_exit_scan()
+
+    # Step 2: entry-scan the watchlist
     snapshots = fetch_all(tickers)
     for snap in snapshots:
         signal = analyze(snap)
