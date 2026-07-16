@@ -23,6 +23,7 @@ from config import (
     ATR_STOP_MULTIPLIER,
     ALLOW_FRACTIONAL_SHARES,
     MIN_FRACTIONAL_SHARES,
+    MAX_TARGET_R_MULTIPLE,
 )
 
 _STATE_FILE = os.path.join(os.path.dirname(__file__), "risk_state.json")
@@ -172,6 +173,14 @@ def check_trade(
             target = round(entry_price - MIN_RISK_REWARD_RATIO * risk_per_share, 2)
     else:
         target = proposed_target
+
+    # Cap target R-multiple so short-swing trades don't chase a distant
+    # Bollinger upper band that would take weeks to reach.
+    max_cap = MAX_TARGET_R_MULTIPLE * risk_per_share
+    if direction == "long":
+        target = min(target, round(entry_price + max_cap, 2))
+    else:
+        target = max(target, round(entry_price - max_cap, 2))
 
     reward_per_share = abs(target - entry_price)
     rr_ratio = reward_per_share / risk_per_share

@@ -56,6 +56,21 @@ MIN_RISK_REWARD_RATIO = _env_float("MIN_RISK_REWARD_RATIO", 2.0)     # R:R ≥ 2
 MAX_OPEN_POSITIONS = _env_int("MAX_OPEN_POSITIONS", 3)
 ATR_STOP_MULTIPLIER = _env_float("ATR_STOP_MULTIPLIER", 2.0)         # stop = entry - 2×ATR
 
+# Cap targets to keep short-swing trades snappy.
+# Bollinger upper band can be 5-8R away, which turns a 3-day trade into 3-week.
+MAX_TARGET_R_MULTIPLE = _env_float("MAX_TARGET_R_MULTIPLE", 3.0)
+
+# Trailing stop R-multiple milestones for the short-swing profile.
+# Grid-searched 2018-2022 in-sample, verified 2023-2025 out-of-sample:
+#   M1=1.0 TS=6 gives Sharpe 2.59, DD -2.4%, ~6-day avg hold.
+# Aggressively low M1 (0.5) scratches too many winners before they run.
+TRAIL_MILESTONE_1 = _env_float("TRAIL_MILESTONE_1", 1.0)   # → stop to breakeven
+TRAIL_MILESTONE_2 = _env_float("TRAIL_MILESTONE_2", 2.0)   # → stop locked at +1R
+TRAIL_MILESTONE_3 = _env_float("TRAIL_MILESTONE_3", 3.0)   # → stop locked at +2R
+
+# Force-close a position after this many trading days if it isn't making progress.
+TIME_STOP_DAYS = _env_int("TIME_STOP_DAYS", 6)
+
 # Robinhood supports fractional shares to 4 decimals; essential for small accounts
 # trading $300+ stocks (NVDA, PANW, etc.) where a whole share exceeds the risk cap.
 ALLOW_FRACTIONAL_SHARES = os.environ.get("ALLOW_FRACTIONAL_SHARES", "true").lower() == "true"

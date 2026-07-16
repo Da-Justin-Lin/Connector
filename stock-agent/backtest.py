@@ -33,9 +33,13 @@ from config import (
     WATCHLIST,
     MAX_RISK_PER_TRADE_PCT,
     MAX_POSITION_PCT,
-    MIN_RISK_REWARD_RATIO,
     ATR_STOP_MULTIPLIER,
     MIN_ADX_TRENDING,
+    MAX_TARGET_R_MULTIPLE,
+    TRAIL_MILESTONE_1,
+    TRAIL_MILESTONE_2,
+    TRAIL_MILESTONE_3,
+    TIME_STOP_DAYS,
 )
 from indicators import atr as compute_atr, adx as compute_adx
 
@@ -161,15 +165,37 @@ def simulate(
             if date not in prepared[ticker].index:
                 continue
             bar = prepared[ticker].loc[date]
+
+            # Update highest price seen while in the position and increment day counter
+            pos["highest_price"] = max(pos["highest_price"], float(bar["High"]))
+            pos["days_held"] += 1
+
+            # Recompute trailing stop based on R-multiple milestones
+            R = pos["entry"] - pos["initial_stop"]
+            if R > 0:
+                highest_R = (pos["highest_price"] - pos["entry"]) / R
+                if highest_R >= TRAIL_MILESTONE_3:
+                    locked_R = TRAIL_MILESTONE_3 - TRAIL_MILESTONE_2
+                    pos["stop"] = round(pos["entry"] + locked_R * R, 2)
+                elif highest_R >= TRAIL_MILESTONE_2:
+                    locked_R = TRAIL_MILESTONE_2 - TRAIL_MILESTONE_1
+                    pos["stop"] = round(pos["entry"] + locked_R * R, 2)
+                elif highest_R >= TRAIL_MILESTONE_1:
+                    pos["stop"] = pos["entry"]
+
             exit_reason = None
             exit_price = None
 
+            # Priority: hard stop → target → time stop
             if bar["Low"] <= pos["stop"]:
-                exit_reason = "stop_loss"
+                exit_reason = "stop_loss" if pos["stop"] == pos["initial_stop"] else "trail_stop"
                 exit_price = pos["stop"]
             elif bar["High"] >= pos["target"]:
                 exit_reason = "target_hit"
                 exit_price = pos["target"]
+            elif pos["days_held"] >= TIME_STOP_DAYS:
+                exit_reason = "time_stop"
+                exit_price = float(bar["Close"])
 
             if exit_reason:
                 pnl = (exit_price - pos["entry"]) * pos["shares"]
@@ -220,14 +246,17 @@ def simulate(
                 if cost > capital * 0.95:  # keep 5% cash
                     continue
 
-                target = round(entry + MIN_RISK_REWARD_RATIO * risk_per_share, 2)
+                target = round(entry + MAX_TARGET_R_MULTIPLE * risk_per_share, 2)
                 capital -= cost
                 open_positions[ticker] = {
                     "shares": shares,
                     "entry": entry,
+                    "initial_stop": stop,
                     "stop": stop,
                     "target": target,
                     "entry_date": date,
+                    "highest_price": entry,
+                    "days_held": 0,
                 }
 
         # Mark-to-market equity

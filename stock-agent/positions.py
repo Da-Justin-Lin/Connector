@@ -24,9 +24,14 @@ from typing import Optional
 
 import yfinance as yf
 
-_POSITIONS_FILE = os.path.join(os.path.dirname(__file__), "positions.json")
+from config import (
+    TIME_STOP_DAYS,
+    TRAIL_MILESTONE_1,
+    TRAIL_MILESTONE_2,
+    TRAIL_MILESTONE_3,
+)
 
-TIME_STOP_DAYS = 10
+_POSITIONS_FILE = os.path.join(os.path.dirname(__file__), "positions.json")
 
 
 @dataclass
@@ -96,7 +101,9 @@ def save_positions(positions: list[Position]) -> None:
 def compute_trailing_stop(pos: Position, highest_price: float) -> tuple[float, Optional[str]]:
     """
     Return (current_stop, milestone_label_if_reached_new_level).
-    Milestone label is None if we're still at initial stop.
+
+    Uses three configurable R-multiple milestones. Defaults are tuned for
+    short-swing (3-5 day) holds: locks in profit fast so gains don't roundtrip.
     """
     R = pos.initial_risk_per_share
     if R <= 0:
@@ -104,12 +111,23 @@ def compute_trailing_stop(pos: Position, highest_price: float) -> tuple[float, O
 
     highest_R = (highest_price - pos.entry_price) / R
 
-    if highest_R >= 3:
-        return round(pos.entry_price + 2 * R, 2), "3R milestone — stop locked at +2R"
-    if highest_R >= 2:
-        return round(pos.entry_price + 1 * R, 2), "2R milestone — stop locked at +1R"
-    if highest_R >= 1:
-        return round(pos.entry_price, 2), "1R milestone — stop moved to breakeven"
+    if highest_R >= TRAIL_MILESTONE_3:
+        locked_R = TRAIL_MILESTONE_3 - TRAIL_MILESTONE_2
+        return (
+            round(pos.entry_price + locked_R * R, 2),
+            f"{TRAIL_MILESTONE_3}R milestone — stop locked at +{locked_R:g}R",
+        )
+    if highest_R >= TRAIL_MILESTONE_2:
+        locked_R = TRAIL_MILESTONE_2 - TRAIL_MILESTONE_1
+        return (
+            round(pos.entry_price + locked_R * R, 2),
+            f"{TRAIL_MILESTONE_2}R milestone — stop locked at +{locked_R:g}R",
+        )
+    if highest_R >= TRAIL_MILESTONE_1:
+        return (
+            round(pos.entry_price, 2),
+            f"{TRAIL_MILESTONE_1}R milestone — stop moved to breakeven",
+        )
     return pos.initial_stop, None
 
 
