@@ -11,7 +11,9 @@ Two kinds of rows land here:
     position_id it belongs to
 """
 
-from fastapi import APIRouter, Depends, Query, Response, status
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -60,3 +62,19 @@ async def list_signals(
     return TradingSignalsResponse(
         signals=[TradingSignalRead.model_validate(s) for s in signals]
     )
+
+
+@router.delete(
+    "/{signal_id}", status_code=204, dependencies=[Depends(require_agent_key)]
+)
+async def delete_signal(
+    signal_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove a signal (cleanup for test/stale rows). Agent-key gated."""
+    row = await db.execute(select(TradingSignal).where(TradingSignal.id == signal_id))
+    sig = row.scalar_one_or_none()
+    if not sig:
+        raise HTTPException(status_code=404, detail="Signal not found")
+    await db.delete(sig)
+    await db.commit()
