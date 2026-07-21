@@ -8,6 +8,7 @@ import { logout } from "@/services/authService";
 
 const NAV_LINKS = [
   { href: "/dashboard", label: "Overview" },
+  { href: "/dashboard/signals", label: "Signals" },
   { href: "/dashboard/deposits", label: "Deposits" },
   { href: "/dashboard/reports", label: "Reports" },
   { href: "/dashboard/macro", label: "Macro" },
