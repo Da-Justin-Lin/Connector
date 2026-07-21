@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     # Comma-separated list of allowed CORS origins
     allowed_origins: str = "http://localhost:3000"
 
+    # Shared secret the stock-agent presents (X-Agent-Key) to POST signals.
+    # Leave blank to disable signal ingest entirely (endpoint returns 503).
+    agent_ingest_key: str = ""
+
     # Google OAuth
     google_client_id: str = ""
     google_client_secret: str = ""

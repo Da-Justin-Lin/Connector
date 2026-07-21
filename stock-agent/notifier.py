@@ -47,6 +47,21 @@ def _gchat_webhook() -> str | None:
     return os.environ.get("GCHAT_WEBHOOK_URL", "").strip() or None
 
 
+def _connector_cfg() -> dict | None:
+    """
+    Config for pushing signals to the Connector web app.
+
+    CONNECTOR_API_URL is the site base (e.g. https://connector.up.railway.app);
+    we POST to {base}/api/v1/signals with the shared agent key. This replaces
+    the flaky Gmail SMTP path — HTTP from the agent host is reliable, SMTP isn't.
+    """
+    base = os.environ.get("CONNECTOR_API_URL", "").strip().rstrip("/")
+    key = os.environ.get("CONNECTOR_AGENT_KEY", "").strip()
+    if base and key:
+        return {"url": f"{base}/api/v1/signals", "key": key}
+    return None
+
+
 def _email_cfg() -> dict | None:
     frm = os.environ.get("EMAIL_FROM", "").strip()
     to = os.environ.get("EMAIL_TO", "").strip()
@@ -134,8 +149,36 @@ def _format_email(signal: dict) -> tuple[str, str]:
     return subject, "\n".join(lines)
 
 
+def _connector_payload(signal: dict) -> dict:
+    """Map the internal signal dict to the Connector /signals schema."""
+    keys = (
+        "ticker", "signal", "confidence", "price", "entry_price", "target_price",
+        "stop_loss", "shares", "score", "max_score", "risk_reward_ratio",
+        "regime", "order_status", "reasoning",
+    )
+    return {k: signal.get(k) for k in keys if signal.get(k) is not None}
+
+
+def _send_connector(signal: dict) -> None:
+    cfg = _connector_cfg()
+    if not cfg:
+        return
+    try:
+        resp = requests.post(
+            cfg["url"],
+            json=_connector_payload(signal),
+            headers={"X-Agent-Key": cfg["key"]},
+            timeout=10,
+        )
+        if resp.status_code >= 300:
+            print(f"[notifier] Connector error {resp.status_code}: {resp.text[:200]}")
+    except Exception as e:
+        print(f"[notifier] Connector push failed: {e}")
+
+
 def send(signal: dict) -> None:
     _send_gchat(signal)
+    _send_connector(signal)
     _send_email(signal)
 
 
