@@ -22,6 +22,8 @@ from app.services.snaptrade_service import (
     fetch_account_balance_async,
     fetch_account_orders_async,
     fetch_account_positions_async,
+    list_accounts,
+    list_brokerage_authorizations,
 )
 from app.services.trade_parsing import (
     order_dedup_key,
@@ -194,6 +196,63 @@ async def refresh_accounts_background(
     finally:
         for aid in pending:
             _syncing.discard(aid)
+
+
+def _extract_auth_id(acct: dict) -> str | None:
+    ba = acct.get("brokerage_authorization")
+    if isinstance(ba, dict):
+        return ba.get("id")
+    if isinstance(ba, str):
+        return ba
+    return None
+
+
+async def refresh_connection_status(user_id: uuid.UUID) -> None:
+    """Refresh each account's disabled flag from SnapTrade in the background.
+
+    A disabled connection keeps serving its last-good snapshot, so without this
+    an account would silently freeze with no way for the UI to prompt a
+    reconnect. Runs off the holdings-refresh cadence, so it stays current
+    without an extra client round-trip.
+    """
+    try:
+        accounts, auths = await asyncio.gather(
+            asyncio.to_thread(list_accounts),
+            asyncio.to_thread(list_brokerage_authorizations),
+        )
+    except Exception as exc:
+        logger.warning("Connection status refresh: fetch failed: %s", exc)
+        return
+
+    disabled_by_auth = {
+        a.get("id"): bool(a.get("disabled"))
+        for a in auths
+        if isinstance(a, dict) and a.get("id")
+    }
+    auth_by_account = {
+        acct.get("id"): _extract_auth_id(acct)
+        for acct in accounts
+        if isinstance(acct, dict) and acct.get("id")
+    }
+
+    async with AsyncSessionLocal() as session:
+        rows = (
+            await session.execute(
+                select(InvestmentAccount).where(
+                    InvestmentAccount.user_id == user_id
+                )
+            )
+        ).scalars().all()
+        changed = False
+        for r in rows:
+            auth = auth_by_account.get(r.snaptrade_account_id)
+            disabled = disabled_by_auth.get(auth, False) if auth else False
+            if r.brokerage_authorization_id != auth or r.connection_disabled != disabled:
+                r.brokerage_authorization_id = auth
+                r.connection_disabled = disabled
+                changed = True
+        if changed:
+            await session.commit()
 
 
 def holdings_is_stale(account: InvestmentAccount, now: datetime) -> bool:

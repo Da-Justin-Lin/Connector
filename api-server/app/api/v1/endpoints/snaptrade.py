@@ -30,7 +30,7 @@ from app.services.position_analytics import (
     compute_trend_stats,
     days_until,
 )
-from app.services.report_sync import ensure_holdings_cached
+from app.services.report_sync import ensure_holdings_cached, refresh_connection_status
 from app.services.snaptrade_service import (
     create_connection_portal_url,
     create_reconnect_portal_url,
@@ -308,6 +308,12 @@ async def get_holdings(
     accounts, _sync_error, stale = await ensure_holdings_cached(
         db, accounts, background
     )
+    # Piggyback on the holdings-refresh cadence to keep each account's
+    # connection (disabled) status current, so a lost connection surfaces a
+    # reconnect prompt without the user having to re-sync manually. Also fire on
+    # first sight of an account (no authorization id yet) so it populates fast.
+    if stale or any(a.brokerage_authorization_id is None for a in accounts):
+        background.add_task(refresh_connection_status, current_user.id)
 
     sections: list[AccountSection] = []
     for account in accounts:
