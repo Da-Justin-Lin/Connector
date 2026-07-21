@@ -58,7 +58,7 @@ function signalLabel(sig: string) {
   return sig.replace(/_/g, " ");
 }
 
-const FILTERS = ["ALL", "BUY", "SELL", "HOLD"] as const;
+const FILTERS = ["ALL", "BUY", "SELL"] as const;
 type Filter = (typeof FILTERS)[number];
 
 export default function SignalsPage() {

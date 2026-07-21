@@ -160,6 +160,9 @@ def _connector_payload(signal: dict) -> dict:
 
 
 def _send_connector(signal: dict) -> None:
+    # HOLD is "do nothing" — don't push it to the dashboard feed.
+    if str(signal.get("signal", "")).upper() == "HOLD":
+        return
     cfg = _connector_cfg()
     if not cfg:
         return
