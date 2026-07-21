@@ -154,7 +154,7 @@ def _connector_payload(signal: dict) -> dict:
     keys = (
         "ticker", "signal", "confidence", "price", "entry_price", "target_price",
         "stop_loss", "shares", "score", "max_score", "risk_reward_ratio",
-        "regime", "order_status", "reasoning",
+        "regime", "order_status", "reasoning", "exit_plan",
     )
     return {k: signal.get(k) for k in keys if signal.get(k) is not None}
 
@@ -224,8 +224,39 @@ def _format_exit_email(alert) -> tuple[str, str]:
     return subject, body
 
 
+def _send_connector_exit(alert) -> None:
+    """
+    Push a position-exit alert to the Connector dashboard so the site tells you
+    when to stop out / take profit / raise your trailing stop — not just email.
+    Maps the ExitAlert onto the same /signals schema (alert_type as the signal).
+    """
+    cfg = _connector_cfg()
+    if not cfg:
+        return
+    payload = {
+        "ticker": alert.ticker,
+        "signal": alert.alert_type,          # HARD_STOP / TARGET_HIT / TRAIL_RAISED / ...
+        "confidence": alert.urgency,         # IMMEDIATE / IMPORTANT / ADVISORY
+        "price": alert.current_price,
+        "entry_price": alert.entry_price,
+        "target_price": alert.target,
+        "stop_loss": alert.current_stop,
+        "shares": alert.shares,
+        "reasoning": alert.message,
+    }
+    try:
+        resp = requests.post(
+            cfg["url"], json=payload, headers={"X-Agent-Key": cfg["key"]}, timeout=10
+        )
+        if resp.status_code >= 300:
+            print(f"[notifier] Connector exit error {resp.status_code}: {resp.text[:200]}")
+    except Exception as e:
+        print(f"[notifier] Connector exit push failed: {e}")
+
+
 def send_exit(alert) -> None:
     """Send a position-exit alert to all configured channels."""
+    _send_connector_exit(alert)
     url = _gchat_webhook()
     if url:
         try:

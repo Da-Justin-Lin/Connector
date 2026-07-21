@@ -48,12 +48,17 @@ MIN_ALERT_CONFIDENCE = os.environ.get("MIN_ALERT_CONFIDENCE", "MEDIUM")
 
 # ---------- Risk management ----------
 ACCOUNT_CAPITAL = _env_float("ACCOUNT_CAPITAL", 1000.0)  # your Robinhood sub-account
-MAX_RISK_PER_TRADE_PCT = _env_float("MAX_RISK_PER_TRADE_PCT", 0.01)  # 1%
-MAX_POSITION_PCT = _env_float("MAX_POSITION_PCT", 0.20)              # single stock max 20%
+# Exposure tuned by the 2018-2025 sweep (sweep_exposure.py): 3% risk/trade beats
+# buy-and-hold QQQ on absolute return (+163% vs +138% OOS) while holding max
+# drawdown to ~half the index (-11% vs SPY -18.8% / QQQ -22.8%). To reproduce
+# the sweep's diversification live, the concurrent-position cap is raised to 6
+# and the single-stock cap to 35% (both were binding at 3% risk).
+MAX_RISK_PER_TRADE_PCT = _env_float("MAX_RISK_PER_TRADE_PCT", 0.03)  # 3%
+MAX_POSITION_PCT = _env_float("MAX_POSITION_PCT", 0.35)              # single stock max 35%
 MAX_DAILY_LOSS_PCT = _env_float("MAX_DAILY_LOSS_PCT", 0.02)          # 2% → stop day
 MAX_DRAWDOWN_PCT = _env_float("MAX_DRAWDOWN_PCT", 0.10)              # 10% → stop trading
 MIN_RISK_REWARD_RATIO = _env_float("MIN_RISK_REWARD_RATIO", 2.0)     # R:R ≥ 2:1
-MAX_OPEN_POSITIONS = _env_int("MAX_OPEN_POSITIONS", 3)
+MAX_OPEN_POSITIONS = _env_int("MAX_OPEN_POSITIONS", 6)
 ATR_STOP_MULTIPLIER = _env_float("ATR_STOP_MULTIPLIER", 2.0)         # stop = entry - 2×ATR
 
 # Cap targets to keep short-swing trades snappy.
