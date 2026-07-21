@@ -28,6 +28,32 @@ def create_connection_portal_url() -> str:
     return response.body["redirectURI"]
 
 
+def create_reconnect_portal_url(authorization_id: str) -> str:
+    """One-time Connection Portal URL that RE-AUTHORIZES an existing connection.
+
+    Passing `reconnect=<authorization_id>` repairs a disabled connection in place
+    instead of creating a new (duplicate) one. Use this when a brokerage session
+    has expired and SnapTrade marked the authorization disabled.
+    """
+    user_id, user_secret = _creds()
+    response = _client().authentication.login_snap_trade_user(
+        user_id=user_id,
+        user_secret=user_secret,
+        reconnect=authorization_id,
+    )
+    return response.body["redirectURI"]
+
+
+def list_brokerage_authorizations() -> list[dict]:
+    """List every brokerage connection, including its `disabled` status."""
+    user_id, user_secret = _creds()
+    response = _client().connections.list_brokerage_authorizations(
+        user_id=user_id,
+        user_secret=user_secret,
+    )
+    return list(response.body or [])
+
+
 def list_accounts() -> list[dict]:
     """List every brokerage account connected by the SnapTrade user."""
     user_id, user_secret = _creds()
