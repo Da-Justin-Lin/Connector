@@ -1,0 +1,88 @@
+"""
+Central configuration.
+
+All knobs live here. To adjust the strategy without touching code, override
+via environment variables (see .env.example).
+"""
+
+import os
+
+
+def _env_float(key: str, default: float) -> float:
+    try:
+        return float(os.environ.get(key, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def _env_int(key: str, default: int) -> int:
+    try:
+        return int(os.environ.get(key, default))
+    except (TypeError, ValueError):
+        return default
+
+
+# ---------- Universe ----------
+# 25-ticker basket balancing mega-cap tech, mid-vol growth, cybersecurity,
+# fintech, and one healthcare blue-chip for defensiveness.
+# Avoids meme-level volatility (no GME/AMC-style).
+MAG7 = ["AAPL", "MSFT", "AMZN", "META", "GOOGL", "TSLA", "NVDA"]
+GROWTH_TECH = ["AMD", "AVGO", "MU", "ORCL", "CRM", "NOW", "PLTR", "SNOW", "NFLX"]
+CYBERSEC = ["PANW", "CRWD"]
+FINTECH_NEW = ["COIN", "HOOD", "CRCL"]
+CONSUMER_NEW = ["SHOP", "UBER", "ABNB"]
+DEFENSIVE = ["UNH"]
+DEFAULT_WATCHLIST = MAG7 + GROWTH_TECH + CYBERSEC + FINTECH_NEW + CONSUMER_NEW + DEFENSIVE
+WATCHLIST = os.environ.get("WATCHLIST", ",".join(DEFAULT_WATCHLIST)).split(",")
+
+# ---------- Loop cadence ----------
+CHECK_INTERVAL_SECONDS = _env_int("CHECK_INTERVAL_SECONDS", 300)
+
+# ---------- Signal thresholds ----------
+RSI_OVERSOLD = _env_int("RSI_OVERSOLD", 30)
+RSI_OVERBOUGHT = _env_int("RSI_OVERBOUGHT", 70)
+MIN_VOLUME_RATIO = _env_float("MIN_VOLUME_RATIO", 1.5)   # 15m volume vs 20-bar avg
+MIN_ADX_TRENDING = _env_int("MIN_ADX_TRENDING", 20)
+MIN_SIGNAL_SCORE = _env_int("MIN_SIGNAL_SCORE", 5)       # out of 13 (backtested sweet spot)
+MIN_ALERT_CONFIDENCE = os.environ.get("MIN_ALERT_CONFIDENCE", "MEDIUM")
+
+# ---------- Risk management ----------
+ACCOUNT_CAPITAL = _env_float("ACCOUNT_CAPITAL", 1000.0)  # your Robinhood sub-account
+MAX_RISK_PER_TRADE_PCT = _env_float("MAX_RISK_PER_TRADE_PCT", 0.01)  # 1%
+MAX_POSITION_PCT = _env_float("MAX_POSITION_PCT", 0.20)              # single stock max 20%
+MAX_DAILY_LOSS_PCT = _env_float("MAX_DAILY_LOSS_PCT", 0.02)          # 2% → stop day
+MAX_DRAWDOWN_PCT = _env_float("MAX_DRAWDOWN_PCT", 0.10)              # 10% → stop trading
+MIN_RISK_REWARD_RATIO = _env_float("MIN_RISK_REWARD_RATIO", 2.0)     # R:R ≥ 2:1
+MAX_OPEN_POSITIONS = _env_int("MAX_OPEN_POSITIONS", 3)
+ATR_STOP_MULTIPLIER = _env_float("ATR_STOP_MULTIPLIER", 2.0)         # stop = entry - 2×ATR
+
+# Cap targets to keep short-swing trades snappy.
+# Bollinger upper band can be 5-8R away, which turns a 3-day trade into 3-week.
+MAX_TARGET_R_MULTIPLE = _env_float("MAX_TARGET_R_MULTIPLE", 3.0)
+
+# Trailing stop R-multiple milestones for the short-swing profile.
+# Grid-searched 2018-2022 in-sample, verified 2023-2025 out-of-sample:
+#   M1=1.0 TS=6 gives Sharpe 2.59, DD -2.4%, ~6-day avg hold.
+# Aggressively low M1 (0.5) scratches too many winners before they run.
+TRAIL_MILESTONE_1 = _env_float("TRAIL_MILESTONE_1", 1.0)   # → stop to breakeven
+TRAIL_MILESTONE_2 = _env_float("TRAIL_MILESTONE_2", 2.0)   # → stop locked at +1R
+TRAIL_MILESTONE_3 = _env_float("TRAIL_MILESTONE_3", 3.0)   # → stop locked at +2R
+
+# Force-close a position after this many trading days if it isn't making progress.
+TIME_STOP_DAYS = _env_int("TIME_STOP_DAYS", 6)
+
+# Robinhood supports fractional shares to 4 decimals; essential for small accounts
+# trading $300+ stocks (NVDA, PANW, etc.) where a whole share exceeds the risk cap.
+ALLOW_FRACTIONAL_SHARES = os.environ.get("ALLOW_FRACTIONAL_SHARES", "true").lower() == "true"
+MIN_FRACTIONAL_SHARES = _env_float("MIN_FRACTIONAL_SHARES", 0.01)
+
+# ---------- Broker (Robinhood Agentic Trading MCP) ----------
+TRADE_MODE = os.environ.get("TRADE_MODE", "SIGNAL_ONLY").upper()
+# Valid: SIGNAL_ONLY | PREVIEW_APPROVAL | FULL_AUTO
+_VALID_MODES = {"SIGNAL_ONLY", "PREVIEW_APPROVAL", "FULL_AUTO"}
+if TRADE_MODE not in _VALID_MODES:
+    raise ValueError(f"TRADE_MODE={TRADE_MODE!r} must be one of {_VALID_MODES}")
+
+ROBINHOOD_MCP_URL = os.environ.get(
+    "ROBINHOOD_MCP_URL", "https://agent.robinhood.com/mcp/trading"
+)

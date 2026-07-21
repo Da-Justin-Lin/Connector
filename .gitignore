@@ -24,6 +24,11 @@ web-client/node_modules/
 # Keep migrations/ tracked, but not the generated pycache inside it
 api-server/alembic/__pycache__/
 
+# ── Stock agent runtime artifacts ────────────────────────────────────────────
+stock-agent/alerts.log
+stock-agent/risk_state.json
+stock-agent/positions.json
+
 # ── OS / editor ──────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
