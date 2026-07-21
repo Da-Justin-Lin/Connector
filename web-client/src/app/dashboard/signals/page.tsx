@@ -20,6 +20,7 @@ interface TradingSignal {
   regime: string | null;
   order_status: string | null;
   reasoning: string | null;
+  exit_plan: string | null;
   created_at: string;
 }
 
@@ -46,9 +47,15 @@ function fmtTime(iso: string) {
 }
 
 function signalClasses(sig: string) {
-  if (sig === "BUY") return "bg-up/10 text-up border-up/30";
-  if (sig === "SELL") return "bg-down/10 text-down border-down/30";
-  return "bg-surface-2 text-muted border-line";
+  // Entry BUY + profit-side exit alerts read green; stop-outs red; trail info blue.
+  if (sig === "BUY" || sig === "TARGET_HIT") return "bg-up/10 text-up border-up/30";
+  if (sig === "SELL" || sig === "HARD_STOP") return "bg-down/10 text-down border-down/30";
+  if (sig === "TRAIL_RAISED") return "bg-brand/10 text-brand border-brand/30";
+  return "bg-surface-2 text-muted border-line"; // HOLD / THESIS_BROKEN / TIME_STOP / REGIME_SHIFT
+}
+
+function signalLabel(sig: string) {
+  return sig.replace(/_/g, " ");
 }
 
 const FILTERS = ["ALL", "BUY", "SELL", "HOLD"] as const;
@@ -131,7 +138,7 @@ export default function SignalsPage() {
                   <span
                     className={`rounded-md border px-2 py-1 text-xs font-bold ${signalClasses(s.signal)}`}
                   >
-                    {s.signal}
+                    {signalLabel(s.signal)}
                   </span>
                   <div>
                     <p className="text-lg font-bold text-content">{s.ticker}</p>
@@ -173,6 +180,15 @@ export default function SignalsPage() {
                   {s.shares && s.risk_reward_ratio ? "  ·  " : ""}
                   {s.risk_reward_ratio ? `R:R ${fmt(s.risk_reward_ratio)}` : ""}
                 </p>
+              )}
+
+              {s.exit_plan && (
+                <div className="mt-3 rounded-md border border-brand/20 bg-brand/5 p-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-brand">
+                    Exit plan · stop / take-profit / trail
+                  </p>
+                  <p className="num mt-1 text-xs leading-relaxed text-content">{s.exit_plan}</p>
+                </div>
               )}
 
               {s.reasoning && (

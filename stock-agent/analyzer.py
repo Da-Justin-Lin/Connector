@@ -17,9 +17,36 @@ import os
 
 import anthropic
 
+from config import (
+    TRAIL_MILESTONE_1,
+    TRAIL_MILESTONE_2,
+    MAX_TARGET_R_MULTIPLE,
+    TIME_STOP_DAYS,
+)
 from market_regime import get_regime
 from rules_engine import evaluate as rule_evaluate
 from risk_manager import check_trade
+
+
+def _build_exit_plan(entry: float, stop: float, target: float) -> str:
+    """
+    Turn the R-multiple trailing rules into concrete price levels the user can
+    read at a glance. Mirrors positions.compute_trailing_stop exactly, so the
+    entry alert and the later exit alerts tell the same story.
+    """
+    R = entry - stop
+    if R <= 0:
+        return ""
+    trigger_be = entry + TRAIL_MILESTONE_1 * R          # +1R → stop to breakeven
+    trigger_lock = entry + TRAIL_MILESTONE_2 * R        # +2R → lock +1R
+    locked_stop = entry + (TRAIL_MILESTONE_2 - TRAIL_MILESTONE_1) * R
+    return (
+        f"Initial stop ${stop:.2f} (−1R, risk ${R:.2f}/sh). "
+        f"At ${trigger_be:.2f} (+1R) move stop to breakeven ${entry:.2f}. "
+        f"At ${trigger_lock:.2f} (+2R) raise stop to ${locked_stop:.2f} (locks +1R). "
+        f"Take profit at target ${target:.2f} (+{MAX_TARGET_R_MULTIPLE:g}R). "
+        f"Time-exit after {TIME_STOP_DAYS} trading days if <50% to target."
+    )
 
 _client: anthropic.Anthropic | None = None
 
@@ -209,6 +236,9 @@ def analyze(snapshot: dict) -> dict | None:
         "score": rule.score,
         "max_score": rule.max_score,
         "regime": regime.regime,
+        "exit_plan": _build_exit_plan(
+            decision.entry_price, decision.stop_loss, decision.target_price
+        ),
         "reasoning": (
             f"Score {rule.score}/{rule.max_score} in {regime.regime} regime. "
             + " | ".join(rule.reasons[:4])

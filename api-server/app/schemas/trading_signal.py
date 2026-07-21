@@ -19,6 +19,7 @@ class TradingSignalCreate(BaseModel):
     regime: str | None = None
     order_status: str | None = None
     reasoning: str | None = None
+    exit_plan: str | None = None
 
 
 class TradingSignalRead(BaseModel):
@@ -37,6 +38,7 @@ class TradingSignalRead(BaseModel):
     regime: str | None
     order_status: str | None
     reasoning: str | None
+    exit_plan: str | None
     created_at: datetime
 
     model_config = {"from_attributes": True}
