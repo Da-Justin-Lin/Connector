@@ -11,7 +11,7 @@ Two kinds of rows land here:
     position_id it belongs to
 """
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,14 +28,15 @@ from app.schemas.trading_signal import (
 router = APIRouter()
 
 
-@router.post(
-    "", response_model=TradingSignalRead, status_code=201,
-    dependencies=[Depends(require_agent_key)],
-)
+@router.post("", status_code=201, dependencies=[Depends(require_agent_key)])
 async def ingest_signal(
     payload: TradingSignalCreate,
     db: AsyncSession = Depends(get_db),
 ):
+    # HOLD means "do nothing" — never store it, so the feed stays actionable-only.
+    if payload.signal.upper() == "HOLD":
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
     signal = TradingSignal(**payload.model_dump())
     db.add(signal)
     await db.commit()
