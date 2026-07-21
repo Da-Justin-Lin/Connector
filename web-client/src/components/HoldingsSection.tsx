@@ -3,9 +3,11 @@
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { SnapTradeReact } from "snaptrade-react";
 
 import AnimatedNumber from "@/components/AnimatedNumber";
 import { useCachedResource } from "@/hooks/useCachedResource";
+import { useSnapTradeConnect } from "@/hooks/useSnapTradeConnect";
 import api from "@/services/api";
 
 interface Holding {
@@ -27,6 +29,7 @@ interface AccountSection {
   holdings_value: number;
   total_value: number;
   holdings: Holding[];
+  connection_disabled?: boolean;
 }
 
 interface HoldingsData {
@@ -73,6 +76,15 @@ function AccountCard({
   const subtitle =
     section.account_name && section.institution_name ? section.account_name : null;
   const [removing, setRemoving] = useState(false);
+  const {
+    openReconnect,
+    close,
+    isOpen,
+    loginLink,
+    loading: reconnecting,
+    onSuccess,
+    onError,
+  } = useSnapTradeConnect();
 
   const handleRemove = async () => {
     const label = subtitle ? `${title} — ${subtitle}` : title;
@@ -118,6 +130,16 @@ function AccountCard({
             <p className="text-xs text-muted">Total</p>
             <p className="num font-semibold text-content">${fmt(section.total_value)}</p>
           </div>
+          {section.connection_disabled && (
+            <button
+              onClick={() => openReconnect(section.snaptrade_account_id)}
+              disabled={reconnecting}
+              title="Re-authorize this brokerage connection"
+              className="tap rounded-lg bg-brand px-2.5 py-1.5 text-xs font-semibold text-white transition-colors hover:opacity-90 disabled:opacity-50"
+            >
+              {reconnecting ? "Loading…" : "Reconnect"}
+            </button>
+          )}
           <button
             onClick={handleRemove}
             disabled={removing}
@@ -128,6 +150,16 @@ function AccountCard({
           </button>
         </div>
       </div>
+
+      {section.connection_disabled && (
+        <div className="flex flex-wrap items-center gap-1.5 border-b border-line bg-down/10 px-6 py-2.5 text-xs text-down">
+          <span className="font-semibold">Connection lost.</span>
+          <span>
+            These numbers are frozen at the last successful sync. Click
+            Reconnect to sign in again and resume updates.
+          </span>
+        </div>
+      )}
 
       {section.holdings.length > 0 ? (
         <div className="overflow-x-auto">
@@ -183,6 +215,14 @@ function AccountCard({
           No holdings in this account.
         </p>
       )}
+
+      <SnapTradeReact
+        loginLink={loginLink ?? ""}
+        isOpen={isOpen}
+        close={close}
+        onSuccess={onSuccess}
+        onError={onError}
+      />
     </div>
   );
 }

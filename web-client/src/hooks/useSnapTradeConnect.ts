@@ -26,6 +26,24 @@ export function useSnapTradeConnect() {
     }
   }, []);
 
+  // Re-authorize an existing (disabled) connection in place, rather than adding
+  // a new one, so a stale account starts syncing again without duplicating it.
+  const openReconnect = useCallback(async (accountId: string) => {
+    setError(null);
+    setLoading(true);
+    try {
+      const { data } = await api.post<{ redirect_uri: string }>(
+        `/api/v1/snaptrade/accounts/${encodeURIComponent(accountId)}/reconnect`,
+      );
+      setLoginLink(data.redirect_uri);
+      setIsOpen(true);
+    } catch {
+      setError("Could not start reconnection. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   const close = useCallback(() => {
     setIsOpen(false);
     setLoginLink(null);
@@ -47,5 +65,5 @@ export function useSnapTradeConnect() {
     close();
   }, [close]);
 
-  return { open, close, isOpen, loginLink, loading, error, onSuccess, onError };
+  return { open, openReconnect, close, isOpen, loginLink, loading, error, onSuccess, onError };
 }

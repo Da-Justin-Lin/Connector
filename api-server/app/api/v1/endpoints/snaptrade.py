@@ -33,11 +33,13 @@ from app.services.position_analytics import (
 from app.services.report_sync import ensure_holdings_cached
 from app.services.snaptrade_service import (
     create_connection_portal_url,
+    create_reconnect_portal_url,
     fetch_account_balance,
     fetch_balance_history_async,
     fetch_return_rates,
     find_account_authorization,
     list_accounts,
+    list_brokerage_authorizations,
     remove_brokerage_authorization,
 )
 from app.services.trade_parsing import normalize_instrument_key, parse_order
@@ -56,6 +58,17 @@ async def get_connection_url(
     return ConnectionUrlResponse(redirect_uri=url)
 
 
+def _extract_auth_id(acct: dict) -> str | None:
+    """Pull the brokerage_authorization (connection) id off an account payload,
+    which SnapTrade returns as either a nested object or a bare id string."""
+    ba = acct.get("brokerage_authorization")
+    if isinstance(ba, dict):
+        return ba.get("id")
+    if isinstance(ba, str):
+        return ba
+    return None
+
+
 @router.post("/sync-accounts", response_model=SyncAccountsResponse)
 async def sync_accounts(
     current_user: User = Depends(get_current_user),
@@ -63,8 +76,17 @@ async def sync_accounts(
 ):
     try:
         remote_accounts = list_accounts()
+        # Connection health lives on the authorizations endpoint, not on the
+        # account payload — fetch it to know which accounts are disabled.
+        authorizations = list_brokerage_authorizations()
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"SnapTrade error: {exc}") from exc
+
+    disabled_by_auth = {
+        a.get("id"): bool(a.get("disabled"))
+        for a in authorizations
+        if isinstance(a, dict) and a.get("id")
+    }
 
     existing_rows = await db.execute(
         select(InvestmentAccount).where(InvestmentAccount.user_id == current_user.id)
@@ -84,6 +106,8 @@ async def sync_accounts(
         meta = acct.get("meta") or {}
         account_type = acct.get("raw_type") or meta.get("type")
         account_number = acct.get("number")
+        auth_id = _extract_auth_id(acct)
+        disabled = disabled_by_auth.get(auth_id, False) if auth_id else False
 
         row = existing_by_id.get(snap_id)
         if row:
@@ -91,6 +115,8 @@ async def sync_accounts(
             row.account_name = name
             row.account_type = account_type
             row.account_number = account_number
+            row.brokerage_authorization_id = auth_id
+            row.connection_disabled = disabled
         else:
             db.add(
                 InvestmentAccount(
@@ -100,12 +126,55 @@ async def sync_accounts(
                     account_name=name,
                     account_type=account_type,
                     account_number=account_number,
+                    brokerage_authorization_id=auth_id,
+                    connection_disabled=disabled,
                 )
             )
         synced += 1
 
     await db.commit()
     return SyncAccountsResponse(accounts_synced=synced)
+
+
+@router.post("/accounts/{account_id}/reconnect", response_model=ConnectionUrlResponse)
+async def reconnect_account(
+    account_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return a Connection Portal URL that re-authorizes this account's existing
+    (disabled) SnapTrade connection instead of creating a duplicate one."""
+    row = (
+        await db.execute(
+            select(InvestmentAccount).where(
+                InvestmentAccount.user_id == current_user.id,
+                InvestmentAccount.snaptrade_account_id == account_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    # Prefer the stored authorization id; fall back to a live lookup for rows
+    # synced before this field existed.
+    authorization_id = row.brokerage_authorization_id
+    if not authorization_id:
+        authorization_id = await asyncio.to_thread(
+            find_account_authorization, account_id
+        )
+    if not authorization_id:
+        raise HTTPException(
+            status_code=404, detail="No SnapTrade connection to reconnect"
+        )
+
+    try:
+        url = await asyncio.to_thread(
+            create_reconnect_portal_url, authorization_id
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"SnapTrade error: {exc}") from exc
+
+    return ConnectionUrlResponse(redirect_uri=url)
 
 
 @router.delete("/accounts/{account_id}", status_code=204)
@@ -255,6 +324,7 @@ async def get_holdings(
                 holdings_value=holdings_value,
                 total_value=round(holdings_value + cash, 2),
                 holdings=holdings,
+                connection_disabled=account.connection_disabled,
             )
         )
 

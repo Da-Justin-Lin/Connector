@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, String, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -28,6 +28,16 @@ class InvestmentAccount(Base):
     account_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     account_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     account_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    # SnapTrade connection (brokerage_authorization) this account belongs to, and
+    # whether SnapTrade has disabled it. A disabled connection keeps serving its
+    # last-good snapshot, so holdings silently go stale until it's reconnected.
+    brokerage_authorization_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
+    connection_disabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

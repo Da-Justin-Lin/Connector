@@ -12,6 +12,7 @@ class InvestmentAccountRead(BaseModel):
     account_name: str | None
     account_type: str | None
     account_number: str | None
+    connection_disabled: bool = False
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -44,6 +45,9 @@ class AccountSection(BaseModel):
     holdings_value: float
     total_value: float
     holdings: list[HoldingRead]
+    # True when SnapTrade has disabled this account's connection; its numbers are
+    # frozen at the last successful sync until the user reconnects.
+    connection_disabled: bool = False
 
 
 class HoldingsResponse(BaseModel):
