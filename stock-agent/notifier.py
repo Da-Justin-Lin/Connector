@@ -224,11 +224,12 @@ def _format_exit_email(alert) -> tuple[str, str]:
     return subject, body
 
 
-def _send_connector_exit(alert) -> None:
+def _send_connector_exit(alert, position_id: str = "") -> None:
     """
     Push a position-exit alert to the Connector dashboard so the site tells you
     when to stop out / take profit / raise your trailing stop — not just email.
-    Maps the ExitAlert onto the same /signals schema (alert_type as the signal).
+    Maps the ExitAlert onto the same /signals schema (alert_type as the signal),
+    tagged with position_id so it lands under the exact position it belongs to.
     """
     cfg = _connector_cfg()
     if not cfg:
@@ -244,6 +245,8 @@ def _send_connector_exit(alert) -> None:
         "shares": alert.shares,
         "reasoning": alert.message,
     }
+    if position_id:
+        payload["position_id"] = position_id
     try:
         resp = requests.post(
             cfg["url"], json=payload, headers={"X-Agent-Key": cfg["key"]}, timeout=10
@@ -254,9 +257,9 @@ def _send_connector_exit(alert) -> None:
         print(f"[notifier] Connector exit push failed: {e}")
 
 
-def send_exit(alert) -> None:
+def send_exit(alert, position_id: str = "") -> None:
     """Send a position-exit alert to all configured channels."""
-    _send_connector_exit(alert)
+    _send_connector_exit(alert, position_id)
     url = _gchat_webhook()
     if url:
         try:

@@ -4,6 +4,7 @@ from app.api.v1.endpoints import (
     auth,
     deposits,
     market,
+    positions,
     reports,
     signals,
     snaptrade,
@@ -18,3 +19,4 @@ router.include_router(market.router, prefix="/market", tags=["Market Data"])
 router.include_router(deposits.router, prefix="/deposits", tags=["Deposits"])
 router.include_router(reports.router, prefix="/reports", tags=["Reports"])
 router.include_router(signals.router, prefix="/signals", tags=["Signals"])
+router.include_router(positions.router, prefix="/positions", tags=["Positions"])
