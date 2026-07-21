@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Index, Integer, Numeric, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, Numeric, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -24,8 +24,11 @@ class TradingSignal(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     ticker: Mapped[str] = mapped_column(String(16), nullable=False)
-    signal: Mapped[str] = mapped_column(String(8), nullable=False)  # BUY / SELL / HOLD
-    confidence: Mapped[str] = mapped_column(String(8), nullable=False, default="MEDIUM")
+    # Entry signals: BUY/SELL/HOLD. Exit alerts reuse this with the alert type
+    # (TRAIL_RAISED, THESIS_BROKEN, ...), so it must hold longer values.
+    signal: Mapped[str] = mapped_column(String(20), nullable=False)
+    # LOW/MEDIUM/HIGH for entries; IMMEDIATE/IMPORTANT/ADVISORY for exit alerts.
+    confidence: Mapped[str] = mapped_column(String(16), nullable=False, default="MEDIUM")
 
     price: Mapped[float] = mapped_column(Numeric(15, 4), nullable=False)
     entry_price: Mapped[float | None] = mapped_column(Numeric(15, 4), nullable=True)
@@ -42,6 +45,12 @@ class TradingSignal(Base):
     reasoning: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Concrete stop/target/trailing plan for an entry signal (empty for exit alerts).
     exit_plan: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # For exit alerts (HARD_STOP / TARGET_HIT / ...): which position they belong to.
+    position_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("positions.id", ondelete="CASCADE"),
+        nullable=True,
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

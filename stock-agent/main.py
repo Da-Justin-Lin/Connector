@@ -108,7 +108,7 @@ def _run_exit_scan() -> None:
         for a in alerts:
             color = {"IMMEDIATE": Fore.RED, "IMPORTANT": Fore.YELLOW, "ADVISORY": Fore.CYAN}.get(a.urgency, Fore.WHITE)
             print(f"  {color}[{a.urgency}] {a.alert_type} — {a.ticker}: {a.message}{Style.RESET_ALL}")
-            notifier.send_exit(a)
+            notifier.send_exit(a, position_id=pos.id)
 
 
 def run_scan(tickers: list[str]) -> None:

@@ -69,6 +69,52 @@ export default function SignalsPage() {
   const filterRef = useRef<Filter>(filter);
   filterRef.current = filter;
 
+  // "I took this trade" inline form state, keyed by the signal being confirmed.
+  const [takingId, setTakingId] = useState<string | null>(null);
+  const [form, setForm] = useState({ shares: "", entry: "", stop: "", target: "" });
+  const [takeMsg, setTakeMsg] = useState<string | null>(null);
+  const [taking, setTaking] = useState(false);
+
+  const openTake = (s: TradingSignal) => {
+    setTakeMsg(null);
+    setForm({
+      shares: s.shares != null ? String(s.shares) : "",
+      entry: s.entry_price != null ? String(s.entry_price) : String(s.price),
+      stop: s.stop_loss != null ? String(s.stop_loss) : "",
+      target: s.target_price != null ? String(s.target_price) : "",
+    });
+    setTakingId(s.id);
+  };
+
+  const submitTake = async (s: TradingSignal) => {
+    const shares = Number(form.shares);
+    const entry = Number(form.entry);
+    const stop = Number(form.stop);
+    const target = Number(form.target);
+    if (!shares || !entry || !stop || !target) {
+      setTakeMsg("Fill in shares, entry, stop and target.");
+      return;
+    }
+    setTaking(true);
+    setTakeMsg(null);
+    try {
+      await api.post("/api/v1/positions", {
+        ticker: s.ticker,
+        shares,
+        entry_price: entry,
+        initial_stop: stop,
+        target,
+        source_signal_id: s.id,
+      });
+      setTakingId(null);
+      setTakeMsg(`Tracking ${s.ticker} in Trades ✓`);
+    } catch {
+      setTakeMsg("Failed to record the trade.");
+    } finally {
+      setTaking(false);
+    }
+  };
+
   const load = () => {
     const f = filterRef.current;
     const url = f === "ALL" ? "/api/v1/signals?limit=100" : `/api/v1/signals?limit=100&signal=${f}`;
@@ -117,6 +163,7 @@ export default function SignalsPage() {
       </div>
 
       {error && <p className="text-sm text-down">{error}</p>}
+      {takeMsg && <p className="text-sm text-brand">{takeMsg}</p>}
 
       {loading ? (
         <p className="px-6 py-8 text-center text-sm text-faint">Loading…</p>
@@ -199,6 +246,60 @@ export default function SignalsPage() {
 
               {s.order_status && (
                 <p className="mt-2 text-xs italic text-faint">{s.order_status}</p>
+              )}
+
+              {s.signal === "BUY" && (
+                <div className="mt-4 border-t border-line pt-3">
+                  {takingId === s.id ? (
+                    <div className="flex flex-col gap-2">
+                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                        {(
+                          [
+                            ["shares", "Shares"],
+                            ["entry", "Entry $"],
+                            ["stop", "Stop $"],
+                            ["target", "Target $"],
+                          ] as const
+                        ).map(([key, label]) => (
+                          <div key={key}>
+                            <label className="block text-[10px] uppercase tracking-wide text-faint">
+                              {label}
+                            </label>
+                            <input
+                              type="number"
+                              step="0.0001"
+                              value={form[key]}
+                              onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+                              className="mt-0.5 w-full rounded-md border border-line bg-surface px-2 py-1 text-sm text-content focus:border-brand focus:outline-none"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => submitTake(s)}
+                          disabled={taking}
+                          className="tap rounded-md bg-brand px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
+                        >
+                          {taking ? "Saving…" : "Confirm trade"}
+                        </button>
+                        <button
+                          onClick={() => setTakingId(null)}
+                          className="tap rounded-md border border-line px-3 py-1.5 text-xs font-medium text-muted hover:text-content"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => openTake(s)}
+                      className="tap rounded-md border border-brand/40 px-3 py-1.5 text-xs font-medium text-brand hover:bg-brand/10"
+                    >
+                      I took this trade
+                    </button>
+                  )}
+                </div>
               )}
             </div>
           ))}

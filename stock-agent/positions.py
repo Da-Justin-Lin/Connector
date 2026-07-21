@@ -22,6 +22,7 @@ from dataclasses import dataclass, asdict, field
 from datetime import date, datetime
 from typing import Optional
 
+import requests
 import yfinance as yf
 
 from config import (
@@ -43,6 +44,7 @@ class Position:
     initial_stop: float
     target: float
     notes: str = ""
+    id: str = ""  # Connector position id (empty for local positions.json entries)
 
     @property
     def initial_risk_per_share(self) -> float:
@@ -73,11 +75,56 @@ class ExitAlert:
 # ---------- Persistence ----------
 
 
+def _load_from_connector() -> Optional[list[Position]]:
+    """
+    Pull OPEN positions the user confirmed on the Connector dashboard.
+
+    This is now the source of truth for what we monitor: the user clicks
+    "I bought this" on a BUY signal, which creates a position with an id, and
+    we return exit alerts tagged with that id. Returns None (not []) when
+    Connector isn't configured so the caller can fall back to local files.
+    """
+    base = os.environ.get("CONNECTOR_API_URL", "").strip().rstrip("/")
+    key = os.environ.get("CONNECTOR_AGENT_KEY", "").strip()
+    if not base or not key:
+        return None
+    try:
+        resp = requests.get(
+            f"{base}/api/v1/positions/monitor",
+            headers={"X-Agent-Key": key},
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            print(f"[positions] Connector monitor error {resp.status_code}: {resp.text[:200]}")
+            return None
+        out = []
+        for p in resp.json().get("positions", []):
+            out.append(
+                Position(
+                    id=str(p["id"]),
+                    ticker=p["ticker"],
+                    shares=float(p["shares"]),
+                    entry_price=float(p["entry_price"]),
+                    entry_date=str(p["entry_date"])[:10],  # yfinance wants YYYY-MM-DD
+                    initial_stop=float(p["initial_stop"]),
+                    target=float(p["target"]),
+                )
+            )
+        return out
+    except Exception as e:
+        print(f"[positions] Connector monitor fetch failed: {e}")
+        return None
+
+
 def load_positions() -> list[Position]:
     """
-    Load from POSITIONS_JSON env var (preferred on Railway) or positions.json (local).
-    Env var wins if both exist.
+    Source order: Connector dashboard (if configured) → POSITIONS_JSON env var →
+    local positions.json.
     """
+    from_connector = _load_from_connector()
+    if from_connector is not None:
+        return from_connector
+
     raw = os.environ.get("POSITIONS_JSON", "").strip()
     if raw:
         data = json.loads(raw)
