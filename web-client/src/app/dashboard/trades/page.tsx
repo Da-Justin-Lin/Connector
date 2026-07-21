@@ -144,6 +144,19 @@ export default function TradesPage() {
           {positions.map((p) => {
             const realized =
               p.exit_price != null ? (p.exit_price - p.entry_price) * p.shares : null;
+            // Current trailing stop = the newest exit alert's stop (they carry the
+            // agent's live current_stop); falls back to the initial stop.
+            const currentStop =
+              p.alerts.find((a) => a.stop_loss != null)?.stop_loss ?? p.initial_stop;
+            const R = p.entry_price - p.initial_stop;
+            const lockedR = R > 0 ? (currentStop - p.entry_price) / R : 0;
+            const raised = currentStop > p.initial_stop + 1e-6;
+            let stopNote = "initial";
+            if (raised) {
+              if (lockedR >= 0.99) stopNote = `+${Math.round(lockedR)}R locked`;
+              else if (lockedR >= -0.01) stopNote = "breakeven";
+              else stopNote = "raised";
+            }
             return (
               <div key={p.id} className="card p-5">
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -180,8 +193,17 @@ export default function TradesPage() {
                     <p className="num text-sm font-semibold text-content">${fmt(p.entry_price)}</p>
                   </div>
                   <div className="rounded-md bg-surface-2 py-2">
-                    <p className="text-[10px] uppercase tracking-wide text-faint">Stop</p>
-                    <p className="num text-sm font-semibold text-down">${fmt(p.initial_stop)}</p>
+                    <p className="text-[10px] uppercase tracking-wide text-faint">
+                      {p.status === "OPEN" ? "Current stop" : "Stop"}
+                    </p>
+                    <p className="num text-sm font-semibold text-down">
+                      ${fmt(p.status === "OPEN" ? currentStop : p.initial_stop)}
+                    </p>
+                    {p.status === "OPEN" && raised && (
+                      <p className="text-[10px] text-up">
+                        {stopNote} · was ${fmt(p.initial_stop)}
+                      </p>
+                    )}
                   </div>
                   <div className="rounded-md bg-surface-2 py-2">
                     <p className="text-[10px] uppercase tracking-wide text-faint">Target</p>
