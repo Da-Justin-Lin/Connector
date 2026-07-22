@@ -175,7 +175,9 @@ def simulate(
             if R > 0:
                 highest_R = (pos["highest_price"] - pos["entry"]) / R
                 if highest_R >= TRAIL_MILESTONE_3:
-                    locked_R = TRAIL_MILESTONE_3 - TRAIL_MILESTONE_2
+                    # lock +2R: measure from the breakeven milestone (M3 - M1), not
+                    # the consecutive-tier gap (M3 - M2) which collapsed onto +1R.
+                    locked_R = TRAIL_MILESTONE_3 - TRAIL_MILESTONE_1
                     pos["stop"] = round(pos["entry"] + locked_R * R, 2)
                 elif highest_R >= TRAIL_MILESTONE_2:
                     locked_R = TRAIL_MILESTONE_2 - TRAIL_MILESTONE_1
