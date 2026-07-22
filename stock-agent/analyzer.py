@@ -20,6 +20,7 @@ import anthropic
 from config import (
     TRAIL_MILESTONE_1,
     TRAIL_MILESTONE_2,
+    TRAIL_MILESTONE_3,
     MAX_TARGET_R_MULTIPLE,
     TIME_STOP_DAYS,
 )
@@ -39,11 +40,15 @@ def _build_exit_plan(entry: float, stop: float, target: float) -> str:
         return ""
     trigger_be = entry + TRAIL_MILESTONE_1 * R          # +1R → stop to breakeven
     trigger_lock = entry + TRAIL_MILESTONE_2 * R        # +2R → lock +1R
+    trigger_lock2 = entry + TRAIL_MILESTONE_3 * R       # +3R → lock +2R
+    # locked_R measured from the breakeven milestone — matches compute_trailing_stop.
     locked_stop = entry + (TRAIL_MILESTONE_2 - TRAIL_MILESTONE_1) * R
+    locked_stop2 = entry + (TRAIL_MILESTONE_3 - TRAIL_MILESTONE_1) * R
     return (
         f"Initial stop ${stop:.2f} (−1R, risk ${R:.2f}/sh). "
         f"At ${trigger_be:.2f} (+1R) move stop to breakeven ${entry:.2f}. "
         f"At ${trigger_lock:.2f} (+2R) raise stop to ${locked_stop:.2f} (locks +1R). "
+        f"At ${trigger_lock2:.2f} (+3R) raise stop to ${locked_stop2:.2f} (locks +2R). "
         f"Take profit at target ${target:.2f} (+{MAX_TARGET_R_MULTIPLE:g}R). "
         f"Time-exit after {TIME_STOP_DAYS} trading days if <50% to target."
     )

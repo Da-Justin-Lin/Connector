@@ -39,6 +39,26 @@ async def ingest_signal(
     if payload.signal.upper() == "HOLD":
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
+    # De-dup exit alerts. The agent's exit-scan is deliberately stateless and
+    # re-emits the same alert every cycle (e.g. TRAIL_RAISED "move stop to $X"
+    # every 5 min for as long as the position is open). Collapse re-fires to one
+    # row per (position, alert_type, stop level): a genuinely new trailing level
+    # (a higher stop_loss) still lands as a fresh alert, but an identical repeat
+    # returns 204 without inserting. Only position-tagged alerts dedup; broadcast
+    # entry signals (no position_id) are untouched.
+    if payload.position_id is not None:
+        dup = await db.execute(
+            select(TradingSignal.id)
+            .where(
+                TradingSignal.position_id == payload.position_id,
+                TradingSignal.signal == payload.signal,
+                TradingSignal.stop_loss == payload.stop_loss,
+            )
+            .limit(1)
+        )
+        if dup.scalar_one_or_none() is not None:
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
+
     signal = TradingSignal(**payload.model_dump())
     db.add(signal)
     await db.commit()
