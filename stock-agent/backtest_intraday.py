@@ -32,9 +32,7 @@ from config import (
     MAX_RISK_PER_TRADE_PCT,
     MAX_POSITION_PCT,
     MAX_TARGET_R_MULTIPLE,
-    TRAIL_MILESTONE_1,
-    TRAIL_MILESTONE_2,
-    TRAIL_MILESTONE_3,
+    CHANDELIER_ATR_MULT,
 )
 
 warnings.filterwarnings("ignore")
@@ -195,16 +193,11 @@ def simulate(tickers, start, end, capital=1000.0, min_score=5):
             pos["highest"] = max(pos["highest"], float(bar["High"]))
             pos["bars"] += 1
 
-            R = pos["entry"] - pos["init_stop"]
-            if R > 0:
-                hi_R = (pos["highest"] - pos["entry"]) / R
-                if hi_R >= TRAIL_MILESTONE_3:
-                    # +3R locks +2R (M3 - M1, measured from the breakeven milestone)
-                    pos["stop"] = round(pos["entry"] + (TRAIL_MILESTONE_3 - TRAIL_MILESTONE_1) * R, 2)
-                elif hi_R >= TRAIL_MILESTONE_2:
-                    pos["stop"] = round(pos["entry"] + (TRAIL_MILESTONE_2 - TRAIL_MILESTONE_1) * R, 2)
-                elif hi_R >= TRAIL_MILESTONE_1:
-                    pos["stop"] = pos["entry"]
+            # Continuous Chandelier trailing stop: highest high since entry −
+            # k×ATR, ratcheted up only (never loosens).
+            atr_now = float(bar["atr"])
+            if atr_now > 0:
+                pos["stop"] = max(pos["stop"], round(pos["highest"] - CHANDELIER_ATR_MULT * atr_now, 2))
 
             reason = price = None
             if float(bar["Low"]) <= pos["stop"]:

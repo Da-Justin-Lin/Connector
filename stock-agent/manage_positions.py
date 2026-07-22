@@ -115,8 +115,8 @@ def cmd_show(args):
         sys.exit(1)
     pos = match[0]
 
-    current, highest, days = _fetch_since_entry(pos.ticker, pos.entry_date)
-    stop, milestone = compute_trailing_stop(pos, highest)
+    current, highest, days, highs, atrs = _fetch_since_entry(pos.ticker, pos.entry_date)
+    stop, milestone = compute_trailing_stop(pos, highs, atrs)
     pnl = (current - pos.entry_price) * pos.shares
     pnl_pct = pnl / (pos.entry_price * pos.shares) * 100
     R_now = (current - pos.entry_price) / pos.initial_risk_per_share

@@ -17,7 +17,7 @@ from backtest_fastdaily import Trade
 warnings.filterwarnings("ignore")
 
 EMA_FAST, EMA_SLOW, TIME_STOP = 20, 50, 4
-TR_M1, TR_M2, TR_M3 = bt.TRAIL_MILESTONE_1, bt.TRAIL_MILESTONE_2, bt.TRAIL_MILESTONE_3
+CHAND_K = bt.CHANDELIER_ATR_MULT
 
 
 def build(tickers, start, end):
@@ -42,15 +42,10 @@ def run_sim(prepared, regime, risk_pct, position_pct, capital=1000.0, min_score=
             bar = prepared[t].loc[date]
             pos["highest"] = max(pos["highest"], float(bar["High"]))
             pos["days"] += 1
-            R = pos["entry"] - pos["init_stop"]
-            if R > 0:
-                hi = (pos["highest"] - pos["entry"]) / R
-                if hi >= TR_M3:
-                    pos["stop"] = round(pos["entry"] + (TR_M3 - TR_M2) * R, 2)
-                elif hi >= TR_M2:
-                    pos["stop"] = round(pos["entry"] + (TR_M2 - TR_M1) * R, 2)
-                elif hi >= TR_M1:
-                    pos["stop"] = pos["entry"]
+            # Continuous Chandelier trailing stop (matches backtest_fastdaily).
+            atr_now = float(bar["atr"])
+            if atr_now > 0:
+                pos["stop"] = max(pos["stop"], round(pos["highest"] - CHAND_K * atr_now, 2))
             reason = price = None
             if float(bar["Low"]) <= pos["stop"]:
                 reason = "stop" if pos["stop"] == pos["init_stop"] else "trail"
