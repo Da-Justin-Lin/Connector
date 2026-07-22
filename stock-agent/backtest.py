@@ -36,9 +36,7 @@ from config import (
     ATR_STOP_MULTIPLIER,
     MIN_ADX_TRENDING,
     MAX_TARGET_R_MULTIPLE,
-    TRAIL_MILESTONE_1,
-    TRAIL_MILESTONE_2,
-    TRAIL_MILESTONE_3,
+    CHANDELIER_ATR_MULT,
     TIME_STOP_DAYS,
 )
 from indicators import atr as compute_atr, adx as compute_adx
@@ -170,20 +168,14 @@ def simulate(
             pos["highest_price"] = max(pos["highest_price"], float(bar["High"]))
             pos["days_held"] += 1
 
-            # Recompute trailing stop based on R-multiple milestones
-            R = pos["entry"] - pos["initial_stop"]
-            if R > 0:
-                highest_R = (pos["highest_price"] - pos["entry"]) / R
-                if highest_R >= TRAIL_MILESTONE_3:
-                    # lock +2R: measure from the breakeven milestone (M3 - M1), not
-                    # the consecutive-tier gap (M3 - M2) which collapsed onto +1R.
-                    locked_R = TRAIL_MILESTONE_3 - TRAIL_MILESTONE_1
-                    pos["stop"] = round(pos["entry"] + locked_R * R, 2)
-                elif highest_R >= TRAIL_MILESTONE_2:
-                    locked_R = TRAIL_MILESTONE_2 - TRAIL_MILESTONE_1
-                    pos["stop"] = round(pos["entry"] + locked_R * R, 2)
-                elif highest_R >= TRAIL_MILESTONE_1:
-                    pos["stop"] = pos["entry"]
+            # Continuous Chandelier trailing stop: highest high since entry −
+            # k×ATR, ratcheted up only (never loosens).
+            atr_now = float(bar["atr"])
+            if atr_now > 0:
+                pos["stop"] = max(
+                    pos["stop"],
+                    round(pos["highest_price"] - CHANDELIER_ATR_MULT * atr_now, 2),
+                )
 
             exit_reason = None
             exit_price = None

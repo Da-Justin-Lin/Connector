@@ -7,29 +7,29 @@ is *re-derived from yfinance history* on each scan. This means the code is
 stateless with respect to time: Railway container restarts, weekend gaps, or
 you editing the JSON never desynchronize the computation.
 
-R-multiple trailing stop rules (matches what I recommended in chat):
-  Once price hits +1R (target/2 zone):  raise stop to entry (breakeven)
-  Once price hits +2R:                   raise stop to entry + 1R
-  Once price hits +3R:                   raise stop to entry + 2R
-  Beyond +3R:                            keep last stop (don't cap unlimited upside)
+Trailing stop: continuous Chandelier — highest high since entry − k×ATR(14),
+ratcheting up only (never loosens), floored at the initial hard stop. The whole
+trail is re-derived from history each scan, so it stays stateless: stop_i =
+max(initial_stop, running_max(high_water_i − k×ATR_i)).
 
 Time-stop: after TIME_STOP_DAYS trading days with < 50% progress toward target, alert.
 """
 
 import json
+import math
 import os
 from dataclasses import dataclass, asdict, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Optional
 
+import pandas as pd
 import requests
 import yfinance as yf
 
 from config import (
     TIME_STOP_DAYS,
-    TRAIL_MILESTONE_1,
-    TRAIL_MILESTONE_2,
-    TRAIL_MILESTONE_3,
+    CHANDELIER_ATR_MULT,
+    CHANDELIER_ATR_PERIOD,
 )
 
 _POSITIONS_FILE = os.path.join(os.path.dirname(__file__), "positions.json")
@@ -145,54 +145,83 @@ def save_positions(positions: list[Position]) -> None:
 # ---------- Trailing stop ----------
 
 
-def compute_trailing_stop(pos: Position, highest_price: float) -> tuple[float, Optional[str]]:
+def compute_trailing_stop(
+    pos: Position, held_highs: Optional[pd.Series], held_atrs: Optional[pd.Series]
+) -> tuple[float, Optional[str]]:
     """
-    Return (current_stop, milestone_label_if_reached_new_level).
+    Continuous Chandelier trailing stop, reconstructed statelessly from the
+    holding-window daily bars:
 
-    Uses three configurable R-multiple milestones. Defaults are tuned for
-    short-swing (3-5 day) holds: locks in profit fast so gains don't roundtrip.
+        stop_i = high_water_i − k×ATR_i,  ratcheted up (never loosens),
+                 floored at the initial hard stop
+
+    where high_water_i is the running max High since entry and ATR_i is the
+    14-bar ATR at bar i. `held_highs` and `held_atrs` are aligned per-bar Series
+    over entry_date..today (see _fetch_since_entry). Returns
+    (current_stop, label_if_raised_above_initial_stop).
     """
+    if held_highs is None or held_atrs is None or len(held_highs) == 0:
+        return round(pos.initial_stop, 2), None
+
+    chandelier = (held_highs.cummax() - CHANDELIER_ATR_MULT * held_atrs).cummax()
+    last = float(chandelier.iloc[-1])
+    if math.isnan(last):
+        return round(pos.initial_stop, 2), None
+
+    stop = round(max(pos.initial_stop, last), 2)
+    if stop <= round(pos.initial_stop, 2):
+        return stop, None
+
     R = pos.initial_risk_per_share
-    if R <= 0:
-        return pos.initial_stop, None
-
-    highest_R = (highest_price - pos.entry_price) / R
-
-    # Each milestone locks in the profit earned *above the first (breakeven)
-    # milestone*: +1R -> breakeven, +2R -> +1R, +3R -> +2R. Measuring locked_R
-    # from TRAIL_MILESTONE_1 keeps every tier ratcheting strictly upward. The old
-    # per-tier gap (Mn - M(n-1)) collapsed the +3R tier back onto +1R, so the
-    # third milestone did nothing and gave back an extra 1R on the best winners.
-    for milestone in (TRAIL_MILESTONE_3, TRAIL_MILESTONE_2, TRAIL_MILESTONE_1):
-        if highest_R >= milestone:
-            locked_R = milestone - TRAIL_MILESTONE_1
-            stop = round(pos.entry_price + locked_R * R, 2)
-            if locked_R <= 0:
-                return stop, f"{milestone:g}R milestone — stop moved to breakeven"
-            return stop, f"{milestone:g}R milestone — stop locked at +{locked_R:g}R"
-    return pos.initial_stop, None
+    locked_R = (stop - pos.entry_price) / R if R > 0 else 0.0
+    if stop >= pos.entry_price:
+        label = f"trailing stop now protects +{locked_R:.1f}R"
+    else:
+        label = "trailing stop tightened toward breakeven"
+    return stop, label
 
 
 # ---------- Data enrichment ----------
 
 
-def _fetch_since_entry(ticker: str, entry_date: str) -> tuple[float, float, int]:
+def _atr_series(df: pd.DataFrame, period: int = CHANDELIER_ATR_PERIOD) -> pd.Series:
+    """Rolling-mean ATR series (matches indicators.atr / the backtests)."""
+    high, low, close = df["High"], df["Low"], df["Close"]
+    prev = close.shift(1)
+    tr = pd.concat(
+        [(high - low), (high - prev).abs(), (low - prev).abs()], axis=1
+    ).max(axis=1)
+    return tr.rolling(period).mean()
+
+
+def _fetch_since_entry(ticker: str, entry_date: str):
     """
-    Return (current_price, highest_price_since_entry, days_held).
-    days_held counts trading days (dropna handles weekends/holidays).
+    Return (current_price, highest_price, days_held, held_highs, held_atrs).
+
+    Pulls ~45 calendar days of lookback before entry so ATR-14 is valid across
+    the whole holding window; highest_price, days_held and the trailing series
+    are measured over the holding window (entry_date..today) only.
     """
-    end = (datetime.utcnow().date()).isoformat()
-    df = yf.Ticker(ticker).history(start=entry_date, end=end, interval="1d")
+    entry_dt = date.fromisoformat(str(entry_date)[:10])
+    start = (entry_dt - timedelta(days=45)).isoformat()
+    end = datetime.utcnow().date().isoformat()
+    df = yf.Ticker(ticker).history(start=start, end=end, interval="1d")
     if df.empty:
         # Fallback to a small recent window
-        df = yf.Ticker(ticker).history(period="1mo", interval="1d")
+        df = yf.Ticker(ticker).history(period="3mo", interval="1d")
     if df.empty:
-        return 0.0, 0.0, 0
+        return 0.0, 0.0, 0, None, None
+
+    atr = _atr_series(df)
+    held = df.index.date >= entry_dt
+    if not held.any():
+        # Position dated in the future / no bars yet — fall back to the last bar.
+        held = df.index == df.index[-1]
 
     current_price = float(df["Close"].iloc[-1])
-    highest_price = float(df["High"].max())
-    days_held = len(df)
-    return current_price, highest_price, days_held
+    highest_price = float(df["High"][held].max())
+    days_held = int(held.sum())
+    return current_price, highest_price, days_held, df["High"][held], atr[held]
 
 
 # ---------- Exit signal evaluators ----------
@@ -350,11 +379,11 @@ def evaluate_position(pos: Position) -> list[ExitAlert]:
     from data_fetcher import fetch_stock_snapshot
     from rules_engine import evaluate as rule_evaluate
 
-    current, highest, days = _fetch_since_entry(pos.ticker, pos.entry_date)
+    current, highest, days, highs, atrs = _fetch_since_entry(pos.ticker, pos.entry_date)
     if current <= 0:
         return []
 
-    current_stop, milestone = compute_trailing_stop(pos, highest)
+    current_stop, milestone = compute_trailing_stop(pos, highs, atrs)
 
     alerts: list[ExitAlert] = []
 

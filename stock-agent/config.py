@@ -65,13 +65,15 @@ ATR_STOP_MULTIPLIER = _env_float("ATR_STOP_MULTIPLIER", 2.0)         # stop = en
 # Bollinger upper band can be 5-8R away, which turns a 3-day trade into 3-week.
 MAX_TARGET_R_MULTIPLE = _env_float("MAX_TARGET_R_MULTIPLE", 3.0)
 
-# Trailing stop R-multiple milestones for the short-swing profile.
-# Grid-searched 2018-2022 in-sample, verified 2023-2025 out-of-sample:
-#   M1=1.0 TS=6 gives Sharpe 2.59, DD -2.4%, ~6-day avg hold.
-# Aggressively low M1 (0.5) scratches too many winners before they run.
-TRAIL_MILESTONE_1 = _env_float("TRAIL_MILESTONE_1", 1.0)   # → stop to breakeven
-TRAIL_MILESTONE_2 = _env_float("TRAIL_MILESTONE_2", 2.0)   # → stop locked at +1R
-TRAIL_MILESTONE_3 = _env_float("TRAIL_MILESTONE_3", 3.0)   # → stop locked at +2R
+# Trailing stop: continuous Chandelier — highest high since entry − k×ATR(period),
+# ratcheting up only (a stop never loosens). Replaced the discrete R-multiple
+# milestone ladder after a 2018-2025 backtest (config "C"): swapping the ladder for
+# k=3 ATR trailing, keeping the same +3R target and 4-day time stop, lifted OOS
+# Sharpe 1.96→2.01 and return 168.8%→179.6% and improved the in-sample split too,
+# at the same drawdown. Unlike a fixed R ladder it tightens as volatility contracts
+# and gives room back as it expands.
+CHANDELIER_ATR_MULT = _env_float("CHANDELIER_ATR_MULT", 3.0)
+CHANDELIER_ATR_PERIOD = _env_int("CHANDELIER_ATR_PERIOD", 14)
 
 # Force-close a position after this many trading days if it isn't making progress.
 # Cut 6 → 4 to match the faster EMA20/50 backbone: backtested avg hold is ~3.7
