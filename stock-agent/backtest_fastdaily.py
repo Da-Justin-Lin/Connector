@@ -177,7 +177,8 @@ def simulate(tickers, start, end, capital, min_score, ema_fast, ema_slow, time_s
             if R > 0:
                 hi = (pos["highest"] - pos["entry"]) / R
                 if hi >= TRAIL_MILESTONE_3:
-                    pos["stop"] = round(pos["entry"] + (TRAIL_MILESTONE_3 - TRAIL_MILESTONE_2) * R, 2)
+                    # +3R locks +2R (M3 - M1, measured from the breakeven milestone)
+                    pos["stop"] = round(pos["entry"] + (TRAIL_MILESTONE_3 - TRAIL_MILESTONE_1) * R, 2)
                 elif hi >= TRAIL_MILESTONE_2:
                     pos["stop"] = round(pos["entry"] + (TRAIL_MILESTONE_2 - TRAIL_MILESTONE_1) * R, 2)
                 elif hi >= TRAIL_MILESTONE_1:
