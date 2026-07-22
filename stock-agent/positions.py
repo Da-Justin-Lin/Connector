@@ -158,23 +158,18 @@ def compute_trailing_stop(pos: Position, highest_price: float) -> tuple[float, O
 
     highest_R = (highest_price - pos.entry_price) / R
 
-    if highest_R >= TRAIL_MILESTONE_3:
-        locked_R = TRAIL_MILESTONE_3 - TRAIL_MILESTONE_2
-        return (
-            round(pos.entry_price + locked_R * R, 2),
-            f"{TRAIL_MILESTONE_3}R milestone — stop locked at +{locked_R:g}R",
-        )
-    if highest_R >= TRAIL_MILESTONE_2:
-        locked_R = TRAIL_MILESTONE_2 - TRAIL_MILESTONE_1
-        return (
-            round(pos.entry_price + locked_R * R, 2),
-            f"{TRAIL_MILESTONE_2}R milestone — stop locked at +{locked_R:g}R",
-        )
-    if highest_R >= TRAIL_MILESTONE_1:
-        return (
-            round(pos.entry_price, 2),
-            f"{TRAIL_MILESTONE_1}R milestone — stop moved to breakeven",
-        )
+    # Each milestone locks in the profit earned *above the first (breakeven)
+    # milestone*: +1R -> breakeven, +2R -> +1R, +3R -> +2R. Measuring locked_R
+    # from TRAIL_MILESTONE_1 keeps every tier ratcheting strictly upward. The old
+    # per-tier gap (Mn - M(n-1)) collapsed the +3R tier back onto +1R, so the
+    # third milestone did nothing and gave back an extra 1R on the best winners.
+    for milestone in (TRAIL_MILESTONE_3, TRAIL_MILESTONE_2, TRAIL_MILESTONE_1):
+        if highest_R >= milestone:
+            locked_R = milestone - TRAIL_MILESTONE_1
+            stop = round(pos.entry_price + locked_R * R, 2)
+            if locked_R <= 0:
+                return stop, f"{milestone:g}R milestone — stop moved to breakeven"
+            return stop, f"{milestone:g}R milestone — stop locked at +{locked_R:g}R"
     return pos.initial_stop, None
 
 
