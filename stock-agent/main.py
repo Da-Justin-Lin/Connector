@@ -47,21 +47,21 @@ init(autoreset=True)
 
 def _place_order_if_needed(signal: dict) -> None:
     """
-    If the signal was BUY/SELL and TRADE_MODE isn't SIGNAL_ONLY, submit the order
+    If the signal was a BUY and TRADE_MODE isn't SIGNAL_ONLY, submit the order
     and record the position with the risk manager. Any resulting status is added
-    back into the signal dict so notifier can include it.
+    back into the signal dict so notifier can include it. The agent is long-only,
+    so entries are always buys; exits are handled by the position exit-scan.
     """
-    if signal["signal"] not in ("BUY", "SELL"):
+    if signal["signal"] != "BUY":
         return
 
     if TRADE_MODE == "SIGNAL_ONLY":
         signal["order_status"] = "SIGNAL_ONLY mode — no order placed"
         return
 
-    side = "buy" if signal["signal"] == "BUY" else "sell"
     result = robinhood_broker.place_order(
         ticker=signal["ticker"],
-        side=side,
+        side="buy",
         shares=signal["shares"],
         limit_price=signal["entry_price"],
         stop_loss=signal["stop_loss"],
@@ -73,9 +73,7 @@ def _place_order_if_needed(signal: dict) -> None:
             f"[{result.mode}] {result.message}"
             + (f" (id={result.order_id})" if result.order_id else "")
         )
-        # Only record long entries in the local risk state for now.
-        # Shorts / exits will be handled once we wire fill webhooks.
-        if signal["signal"] == "BUY" and TRADE_MODE == "FULL_AUTO":
+        if TRADE_MODE == "FULL_AUTO":
             from risk_manager import TradeDecision
             record_entry(
                 signal["ticker"],

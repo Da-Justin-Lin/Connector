@@ -125,7 +125,7 @@ def analyze(snapshot: dict) -> dict | None:
     # strength (stock must outperform the index over the same window).
     rule = rule_evaluate(snapshot, spy_return=regime.spy_rs_return)
 
-    # Regime veto: don't take longs in BEAR/PANIC or shorts in BULL
+    # Regime veto: don't take longs in BEAR/PANIC (long-only agent).
     if rule.signal == "BUY" and not regime.allows_long():
         return {
             "ticker": ticker,
@@ -135,19 +135,6 @@ def analyze(snapshot: dict) -> dict | None:
             "reasoning": (
                 f"Rules said BUY (score {rule.score}/{rule.max_score}) but "
                 f"regime={regime.regime} blocks longs. {regime.reason}"
-            ),
-            "score": rule.score,
-            "regime": regime.regime,
-        }
-    if rule.signal == "SELL" and not regime.allows_short():
-        return {
-            "ticker": ticker,
-            "price": price,
-            "signal": "HOLD",
-            "confidence": "LOW",
-            "reasoning": (
-                f"Rules said SELL (score {rule.score}/{rule.max_score}) but "
-                f"regime={regime.regime} blocks shorts. {regime.reason}"
             ),
             "score": rule.score,
             "regime": regime.regime,
@@ -166,14 +153,14 @@ def analyze(snapshot: dict) -> dict | None:
         }
 
     # ---------- 3. Risk manager ----------
+    # proposed_target=None → risk_manager uses the validated flat entry+3R target
+    # (not the Bollinger band; see risk_manager and the backtests).
     decision = check_trade(
         ticker=ticker,
         signal=rule.signal,
         entry_price=rule.entry_price,
         atr=rule.atr,
-        proposed_target=(
-            rule.daily_bb_upper if rule.signal == "BUY" else rule.daily_bb_lower
-        ),
+        proposed_target=None,
     )
     if not decision.approved:
         return {

@@ -1,3 +1,5 @@
+import math
+
 import numpy as np
 import pandas as pd
 
@@ -9,7 +11,15 @@ def rsi(prices: pd.Series, period: int = 14) -> float:
     avg_gain = gain.ewm(com=period - 1, min_periods=period).mean()
     avg_loss = loss.ewm(com=period - 1, min_periods=period).mean()
     rs = avg_gain / avg_loss.replace(0, np.nan)
-    return float(100 - (100 / (1 + rs)).iloc[-1])
+    val = float((100 - (100 / (1 + rs))).iloc[-1])
+    if math.isnan(val):
+        # avg_loss == 0 (no down bars in the window) → RSI is 100 by definition;
+        # if there were also no up bars (flat / too little data) → neutral 50.
+        # Returning a number (not NaN) keeps `x < threshold` checks meaningful
+        # and stops NaN from leaking into the scorer's `or`-defaults.
+        last_gain = avg_gain.iloc[-1]
+        val = 100.0 if (not pd.isna(last_gain) and last_gain > 0) else 50.0
+    return val
 
 
 def macd(prices: pd.Series) -> dict:
@@ -70,7 +80,8 @@ def atr(df: pd.DataFrame, period: int = 14) -> float:
 
 
 def adx(df: pd.DataFrame, period: int = 14) -> float:
-    """Average Directional Index — trend strength. >25 = trending, <20 = ranging."""
+    """Average Directional Index — trend strength. ~25+ = strong trend, <20 =
+    ranging; entries gate on config.MIN_ADX_TRENDING (default 20)."""
     high = df["High"]
     low = df["Low"]
     close = df["Close"]
