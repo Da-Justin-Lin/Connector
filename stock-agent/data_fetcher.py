@@ -10,7 +10,16 @@ The confluence engine uses these together — see analyzer.py.
 """
 
 import yfinance as yf
+
+from config import RS_LOOKBACK_DAYS
 from indicators import compute_all
+
+
+def _trailing_return(closes, lookback: int) -> float | None:
+    """Simple lookback-day return (close/close_lookback_ago − 1) for RS vs SPY."""
+    if len(closes) < lookback + 1:
+        return None
+    return round(float(closes.iloc[-1] / closes.iloc[-(lookback + 1)] - 1), 4)
 
 
 def _safe_history(tk: yf.Ticker, period: str, interval: str):
@@ -44,6 +53,10 @@ def fetch_stock_snapshot(ticker: str) -> dict | None:
         )
         day_change_pct = round((current_price - prev_close) / prev_close * 100, 2)
 
+        daily_ind = compute_all(df_daily)
+        # Trailing return for relative-strength gating vs SPY (see rules_engine).
+        daily_ind["rs_return"] = _trailing_return(df_daily["Close"], RS_LOOKBACK_DAYS)
+
         return {
             "ticker": ticker,
             "price": round(current_price, 4),
@@ -51,7 +64,7 @@ def fetch_stock_snapshot(ticker: str) -> dict | None:
             "day_change_pct": day_change_pct,
             "day_high": round(float(df_15m["High"].max()), 4),
             "day_low": round(float(df_15m["Low"].min()), 4),
-            "daily": compute_all(df_daily),
+            "daily": daily_ind,
             "hourly": compute_all(df_1h),
             "intraday": compute_all(df_15m),
         }

@@ -17,6 +17,8 @@ from config import (
     MIN_VOLUME_RATIO,
     MIN_ADX_TRENDING,
     MIN_SIGNAL_SCORE,
+    BLOCK_DOWNTREND_ENTRY,
+    REQUIRE_RELATIVE_STRENGTH,
 )
 
 Signal = Literal["BUY", "SELL", "HOLD"]
@@ -57,7 +59,16 @@ def _has_downtrend(daily: dict) -> bool:
     return ema_50 > 0 and price < ema_20 < ema_50
 
 
-def evaluate(snapshot: dict) -> RuleSignal:
+def evaluate(snapshot: dict, spy_return: float | None = None) -> RuleSignal:
+    """
+    Score the setup and emit BUY/SELL/HOLD.
+
+    `spy_return` is SPY's trailing return over the same window as the stock's
+    `daily["rs_return"]` (see market_regime / config.RS_LOOKBACK_DAYS). When
+    provided and REQUIRE_RELATIVE_STRENGTH is on, a BUY is gated on the stock
+    beating SPY. Callers without a benchmark (e.g. the position thesis re-check)
+    pass None to skip the RS gate.
+    """
     daily = snapshot["daily"]
     hourly = snapshot["hourly"]
     intraday = snapshot["intraday"]
@@ -136,7 +147,27 @@ def evaluate(snapshot: dict) -> RuleSignal:
 
     # ----- Verdict -----
     max_score = 13
-    if buy_score >= MIN_SIGNAL_SCORE and buy_score > sell_score:
+
+    # BUY admission gates the score alone can't express (see config for the
+    # backtest that motivated these). Applied only to longs; SELL is unaffected.
+    buy_ok = buy_score >= MIN_SIGNAL_SCORE and buy_score > sell_score
+    if buy_ok and BLOCK_DOWNTREND_ENTRY and _has_downtrend(daily):
+        buy_ok = False
+        reasons.append(
+            "[gate] BUY blocked: stock in confirmed daily downtrend (price < EMA20 < EMA50)"
+        )
+    if buy_ok and REQUIRE_RELATIVE_STRENGTH and spy_return is not None:
+        stock_return = daily.get("rs_return")
+        # Unknown RS (too little history) is treated as a fail — conservative,
+        # and matches the backtest (NaN return → no entry).
+        if stock_return is None or stock_return <= spy_return:
+            buy_ok = False
+            reasons.append(
+                f"[gate] BUY blocked: relative weakness "
+                f"(stock {stock_return} ≤ SPY {round(spy_return, 4)})"
+            )
+
+    if buy_ok:
         return RuleSignal(
             signal="BUY",
             score=buy_score,

@@ -46,6 +46,26 @@ MIN_ADX_TRENDING = _env_int("MIN_ADX_TRENDING", 20)
 MIN_SIGNAL_SCORE = _env_int("MIN_SIGNAL_SCORE", 5)       # out of 13 (backtested sweet spot)
 MIN_ALERT_CONFIDENCE = os.environ.get("MIN_ALERT_CONFIDENCE", "MEDIUM")
 
+# ---------- Entry-quality filters (relative strength + trend gate) ----------
+# The score threshold above admits some low-quality longs the score alone can't
+# see: (a) oversold *bounces inside a confirmed daily downtrend* (price<EMA20<
+# EMA50) — the score's uptrend term is only a +2 bonus, not a gate, so a bounce
+# can clear 5 with no trend at all — and (b) laggards drifting up slower than
+# the index. A 2018-2025 sweep (reproduce via backtest_fastdaily.py) showed two
+# hard filters fix both without hurting the bull-market upside:
+#   BLOCK_DOWNTREND_ENTRY     — never open a long while price<EMA20<EMA50
+#   REQUIRE_RELATIVE_STRENGTH — stock's RS_LOOKBACK-day return must beat SPY's
+# Together (OOS 2023-25, vs the score-only baseline): max drawdown -16.1%→-12.0%,
+# profit factor 1.48→1.59 at ~flat return (179.6%→174.2%), and the train/test
+# Sharpe gap roughly halves (0.78→2.01 baseline vs 1.25→1.96) — i.e. the edge
+# generalizes across regimes instead of riding the 2023-25 bull. RS lookback was
+# picked on the TRAIN split (20d best there) and confirmed OOS; the 10-30d band
+# is a plateau (all cut DD and lift PF), 20 preserves return best.
+# Set both to false to reproduce the pre-filter score-only baseline.
+BLOCK_DOWNTREND_ENTRY = os.environ.get("BLOCK_DOWNTREND_ENTRY", "true").lower() == "true"
+REQUIRE_RELATIVE_STRENGTH = os.environ.get("REQUIRE_RELATIVE_STRENGTH", "true").lower() == "true"
+RS_LOOKBACK_DAYS = _env_int("RS_LOOKBACK_DAYS", 20)
+
 # ---------- Risk management ----------
 ACCOUNT_CAPITAL = _env_float("ACCOUNT_CAPITAL", 1000.0)  # your Robinhood sub-account
 # Exposure tuned by the 2018-2025 sweep (sweep_exposure.py): 3% risk/trade beats
