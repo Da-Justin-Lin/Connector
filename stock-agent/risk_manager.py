@@ -165,22 +165,33 @@ def check_trade(
             f"size-cap: {shares_by_size}, capital: ${state.current_capital:.2f})",
         )
 
-    # Target: 2x the risk if not provided
+    # Target: flat entry ± MAX_TARGET_R_MULTIPLE×R. This is what the backtests
+    # validated (a fixed R-multiple target, NOT the Bollinger upper band). A
+    # band target could land *below* entry when price is extended above the band
+    # — abs() in the R:R math would hide it and set a take-profit under entry.
+    def _r_target() -> float:
+        return round(
+            entry_price + MAX_TARGET_R_MULTIPLE * risk_per_share
+            if direction == "long"
+            else entry_price - MAX_TARGET_R_MULTIPLE * risk_per_share,
+            2,
+        )
+
     if proposed_target is None or proposed_target <= 0:
-        if direction == "long":
-            target = round(entry_price + MIN_RISK_REWARD_RATIO * risk_per_share, 2)
-        else:
-            target = round(entry_price - MIN_RISK_REWARD_RATIO * risk_per_share, 2)
+        target = _r_target()
     else:
         target = proposed_target
 
-    # Cap target R-multiple so short-swing trades don't chase a distant
-    # Bollinger upper band that would take weeks to reach.
+    # Cap at the R-multiple, and never leave the target on the wrong side of entry.
     max_cap = MAX_TARGET_R_MULTIPLE * risk_per_share
     if direction == "long":
         target = min(target, round(entry_price + max_cap, 2))
+        if target <= entry_price:
+            target = _r_target()
     else:
         target = max(target, round(entry_price - max_cap, 2))
+        if target >= entry_price:
+            target = _r_target()
 
     reward_per_share = abs(target - entry_price)
     rr_ratio = reward_per_share / risk_per_share
