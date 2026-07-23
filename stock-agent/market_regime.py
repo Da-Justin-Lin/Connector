@@ -16,6 +16,8 @@ from typing import Literal
 
 import yfinance as yf
 
+from config import RS_LOOKBACK_DAYS
+
 Regime = Literal["BULL", "NEUTRAL", "BEAR", "PANIC"]
 
 _CACHE: dict = {"regime": None, "ts": 0, "detail": None}
@@ -30,6 +32,9 @@ class RegimeInfo:
     spy_ma200: float
     vix: float
     reason: str
+    # SPY's own RS_LOOKBACK-day return — the benchmark a long must beat to pass
+    # the relative-strength gate in rules_engine. None if it can't be computed.
+    spy_rs_return: float | None = None
 
     def allows_long(self) -> bool:
         return self.regime in ("BULL", "NEUTRAL")
@@ -65,6 +70,13 @@ def _fetch_regime() -> RegimeInfo:
     spy_ma200 = float(spy["Close"].rolling(200).mean().iloc[-1])
     vix = float(vix_hist["Close"].iloc[-1])
 
+    spy_close = spy["Close"]
+    spy_rs_return = (
+        round(float(spy_close.iloc[-1] / spy_close.iloc[-(RS_LOOKBACK_DAYS + 1)] - 1), 4)
+        if len(spy_close) >= RS_LOOKBACK_DAYS + 1
+        else None
+    )
+
     if vix > 30:
         regime: Regime = "PANIC"
         reason = f"VIX={vix:.1f} > 30 (fear regime)"
@@ -85,6 +97,7 @@ def _fetch_regime() -> RegimeInfo:
         spy_ma200=round(spy_ma200, 2),
         vix=round(vix, 2),
         reason=reason,
+        spy_rs_return=spy_rs_return,
     )
 
 

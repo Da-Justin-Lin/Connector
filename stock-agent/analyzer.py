@@ -121,7 +121,9 @@ def analyze(snapshot: dict) -> dict | None:
     regime = get_regime()
 
     # ---------- 2. Rules engine ----------
-    rule = rule_evaluate(snapshot)
+    # Pass SPY's trailing return so the rules engine can gate longs on relative
+    # strength (stock must outperform the index over the same window).
+    rule = rule_evaluate(snapshot, spy_return=regime.spy_rs_return)
 
     # Regime veto: don't take longs in BEAR/PANIC or shorts in BULL
     if rule.signal == "BUY" and not regime.allows_long():
