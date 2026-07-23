@@ -23,16 +23,27 @@ def _env_int(key: str, default: int) -> int:
 
 
 # ---------- Universe ----------
-# 25-ticker basket balancing mega-cap tech, mid-vol growth, cybersecurity,
-# fintech, and one healthcare blue-chip for defensiveness.
-# Avoids meme-level volatility (no GME/AMC-style).
+# 42-ticker basket. Deliberately broadened beyond tech (was ~85% tech) into
+# financials, energy, industrials/defense, healthcare and staples so the
+# relative-strength gate has somewhere to rotate when tech leadership fades —
+# a tech-only basket moves together and gives the RS/regime machinery nothing
+# to switch into. More names only widen the candidate pool for RS to rank;
+# concurrent risk is still bounded by MAX_OPEN_POSITIONS / MAX_POSITION_PCT.
+# A handful of higher-beta names (AFRM, UPST, SOFI, RBLX) sit closer to the
+# volatility line by explicit request.
 MAG7 = ["AAPL", "MSFT", "AMZN", "META", "GOOGL", "TSLA", "NVDA"]
-GROWTH_TECH = ["AMD", "AVGO", "MU", "ORCL", "CRM", "NOW", "PLTR", "SNOW", "NFLX"]
+GROWTH_TECH = ["AMD", "AVGO", "MU", "ORCL", "CRM", "NOW", "PLTR", "SNOW", "NFLX", "MRVL", "DELL"]
 CYBERSEC = ["PANW", "CRWD"]
-FINTECH_NEW = ["COIN", "HOOD", "CRCL"]
-CONSUMER_NEW = ["SHOP", "UBER", "ABNB"]
-DEFENSIVE = ["UNH"]
-DEFAULT_WATCHLIST = MAG7 + GROWTH_TECH + CYBERSEC + FINTECH_NEW + CONSUMER_NEW + DEFENSIVE
+FINTECH = ["COIN", "HOOD", "CRCL", "V", "SOFI", "AFRM", "UPST"]
+CONSUMER = ["SHOP", "UBER", "ABNB", "MELI", "COST", "LULU", "RBLX"]
+HEALTHCARE = ["UNH", "LLY", "NVO"]
+FINANCIALS = ["JPM", "BRK-B"]
+ENERGY = ["XOM"]
+INDUSTRIALS = ["GE", "RTX"]
+DEFAULT_WATCHLIST = (
+    MAG7 + GROWTH_TECH + CYBERSEC + FINTECH + CONSUMER
+    + HEALTHCARE + FINANCIALS + ENERGY + INDUSTRIALS
+)
 WATCHLIST = os.environ.get("WATCHLIST", ",".join(DEFAULT_WATCHLIST)).split(",")
 
 # ---------- Loop cadence ----------
