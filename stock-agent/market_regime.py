@@ -39,9 +39,6 @@ class RegimeInfo:
     def allows_long(self) -> bool:
         return self.regime in ("BULL", "NEUTRAL")
 
-    def allows_short(self) -> bool:
-        return self.regime in ("BEAR", "PANIC")
-
     def position_size_multiplier(self) -> float:
         """
         Scale position size by regime confidence.

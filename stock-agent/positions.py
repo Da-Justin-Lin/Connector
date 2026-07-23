@@ -290,10 +290,11 @@ def _check_trail(pos: Position, current: float, stop: float, days: int, mileston
 
 def _check_thesis(pos: Position, current: float, stop: float, days: int, rule_signal, rule_score: int) -> Optional[ExitAlert]:
     """
-    Thesis is broken if the rules engine now emits SELL, or the score has
-    collapsed (< 3 means most bullish conditions have unwound).
+    Thesis is broken when the long score has collapsed (< 3 means most bullish
+    conditions that justified the entry have unwound). The agent is long-only,
+    so `rule_signal` here is only ever BUY or HOLD.
     """
-    if rule_signal == "SELL" or rule_score < 3:
+    if rule_score < 3:
         pnl = (current - pos.entry_price) * pos.shares
         return ExitAlert(
             ticker=pos.ticker,

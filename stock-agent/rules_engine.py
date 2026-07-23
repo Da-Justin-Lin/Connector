@@ -13,7 +13,6 @@ from typing import Literal
 
 from config import (
     RSI_OVERSOLD,
-    RSI_OVERBOUGHT,
     MIN_VOLUME_RATIO,
     MIN_ADX_TRENDING,
     MIN_SIGNAL_SCORE,
@@ -21,6 +20,8 @@ from config import (
     REQUIRE_RELATIVE_STRENGTH,
 )
 
+# HOLD/BUY only — the agent is long-only (see evaluate). SELL remains in the
+# type for exit-side code (selling to close a long) but is never emitted here.
 Signal = Literal["BUY", "SELL", "HOLD"]
 
 
@@ -61,7 +62,14 @@ def _has_downtrend(daily: dict) -> bool:
 
 def evaluate(snapshot: dict, spy_return: float | None = None) -> RuleSignal:
     """
-    Score the setup and emit BUY/SELL/HOLD.
+    Score the LONG setup and emit BUY or HOLD.
+
+    Long-only by design — this mirrors the validated backtest, which has no
+    short side. A prior short-scoring path only ever *suppressed* longs (via a
+    buy>sell tie-break) and, in a BULL/NEUTRAL regime where shorts are blocked
+    anyway, its main effect was to penalise the RSI>60 momentum leaders that the
+    relative-strength gate is meant to buy. Position management (positions.py)
+    is also long-only, so a short could never be tracked or exited safely.
 
     `spy_return` is SPY's trailing return over the same window as the stock's
     `daily["rs_return"]` (see market_regime / config.RS_LOOKBACK_DAYS). When
@@ -81,76 +89,57 @@ def evaluate(snapshot: dict, spy_return: float | None = None) -> RuleSignal:
     bb_lower = float(bb.get("lower") or 0)
 
     buy_score = 0
-    sell_score = 0
     reasons: list[str] = []
 
-    # ----- LONG-side scoring -----
+    # None-aware defaults: a valid extreme (RSI 0, no volume) must not be
+    # clobbered to neutral the way `x or default` would.
+    d_rsi = daily.get("rsi_14")
+    d_rsi = 50.0 if d_rsi is None else d_rsi
+    i_rsi = intraday.get("rsi_14")
+    i_rsi = 50.0 if i_rsi is None else i_rsi
+    vol_ratio = intraday.get("volume_ratio")
+    vol_ratio = 1.0 if vol_ratio is None else vol_ratio
+
     if _has_uptrend(daily):
         buy_score += 2
-        reasons.append("[+2 long] daily uptrend: price > EMA20 > EMA50")
+        reasons.append("[+2] daily uptrend: price > EMA20 > EMA50")
 
-    d_rsi = daily.get("rsi_14") or 50
     if d_rsi < RSI_OVERSOLD + 10:  # RSI < 40 on daily = pullback in trend
         buy_score += 2
-        reasons.append(f"[+2 long] daily RSI={d_rsi} (pullback zone)")
+        reasons.append(f"[+2] daily RSI={round(d_rsi, 1)} (pullback zone)")
 
     h_macd = hourly.get("macd", {})
     if h_macd.get("fresh_bull_cross"):
         buy_score += 3
-        reasons.append("[+3 long] hourly MACD fresh bullish cross")
+        reasons.append("[+3] hourly MACD fresh bullish cross")
     elif h_macd.get("histogram", 0) > 0:
         buy_score += 1
-        reasons.append("[+1 long] hourly MACD histogram positive")
+        reasons.append("[+1] hourly MACD histogram positive")
 
     i_macd = intraday.get("macd", {})
     if i_macd.get("fresh_bull_cross"):
         buy_score += 2
-        reasons.append("[+2 long] 15m MACD fresh bullish cross (entry trigger)")
+        reasons.append("[+2] 15m MACD fresh bullish cross (entry trigger)")
 
-    i_rsi = intraday.get("rsi_14") or 50
     if i_rsi < RSI_OVERSOLD:
         buy_score += 1
-        reasons.append(f"[+1 long] 15m RSI oversold ({i_rsi})")
+        reasons.append(f"[+1] 15m RSI oversold ({round(i_rsi, 1)})")
 
-    vol_ratio = intraday.get("volume_ratio") or 1.0
     if vol_ratio >= MIN_VOLUME_RATIO:
         buy_score += 2
-        reasons.append(f"[+2 both] 15m volume {vol_ratio}x avg (confirmation)")
-        sell_score += 2  # volume confirms in either direction
+        reasons.append(f"[+2] 15m volume {vol_ratio}x avg (confirmation)")
 
     d_adx = daily.get("adx_14") or 0
     if d_adx >= MIN_ADX_TRENDING:
         buy_score += 1
-        sell_score += 1
-        reasons.append(f"[+1 both] daily ADX={d_adx} (trending market)")
+        reasons.append(f"[+1] daily ADX={d_adx} (trending market)")
 
-    # ----- SHORT-side scoring -----
-    if _has_downtrend(daily):
-        sell_score += 2
-        reasons.append("[+2 short] daily downtrend: price < EMA20 < EMA50")
-
-    if d_rsi > RSI_OVERBOUGHT - 10:  # RSI > 60 on daily = overextended
-        sell_score += 2
-        reasons.append(f"[+2 short] daily RSI={d_rsi} (overbought zone)")
-
-    if h_macd.get("fresh_bear_cross"):
-        sell_score += 3
-        reasons.append("[+3 short] hourly MACD fresh bearish cross")
-
-    if i_macd.get("fresh_bear_cross"):
-        sell_score += 2
-        reasons.append("[+2 short] 15m MACD fresh bearish cross")
-
-    if i_rsi > RSI_OVERBOUGHT:
-        sell_score += 1
-        reasons.append(f"[+1 short] 15m RSI overbought ({i_rsi})")
-
-    # ----- Verdict -----
+    # ----- Verdict (long-only; matches the validated backtest) -----
     max_score = 13
+    buy_ok = buy_score >= MIN_SIGNAL_SCORE
 
     # BUY admission gates the score alone can't express (see config for the
-    # backtest that motivated these). Applied only to longs; SELL is unaffected.
-    buy_ok = buy_score >= MIN_SIGNAL_SCORE and buy_score > sell_score
+    # backtest that motivated these).
     if buy_ok and BLOCK_DOWNTREND_ENTRY and _has_downtrend(daily):
         buy_ok = False
         reasons.append(
@@ -178,20 +167,9 @@ def evaluate(snapshot: dict, spy_return: float | None = None) -> RuleSignal:
             daily_bb_upper=bb_upper,
             daily_bb_lower=bb_lower,
         )
-    if sell_score >= MIN_SIGNAL_SCORE and sell_score > buy_score:
-        return RuleSignal(
-            signal="SELL",
-            score=sell_score,
-            max_score=max_score,
-            reasons=reasons,
-            entry_price=price,
-            atr=atr_val,
-            daily_bb_upper=bb_upper,
-            daily_bb_lower=bb_lower,
-        )
     return RuleSignal(
         signal="HOLD",
-        score=max(buy_score, sell_score),
+        score=buy_score,
         max_score=max_score,
         reasons=reasons or ["No indicators aligned"],
         entry_price=price,
