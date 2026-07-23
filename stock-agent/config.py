@@ -23,21 +23,24 @@ def _env_int(key: str, default: int) -> int:
 
 
 # ---------- Universe ----------
-# 42-ticker basket. Deliberately broadened beyond tech (was ~85% tech) into
-# financials, energy, industrials/defense, healthcare and staples so the
-# relative-strength gate has somewhere to rotate when tech leadership fades —
-# a tech-only basket moves together and gives the RS/regime machinery nothing
-# to switch into. More names only widen the candidate pool for RS to rank;
-# concurrent risk is still bounded by MAX_OPEN_POSITIONS / MAX_POSITION_PCT.
-# A handful of higher-beta names (AFRM, UPST, SOFI, RBLX) sit closer to the
-# volatility line by explicit request.
+# 33-ticker basket. Broadened beyond the old tech-heavy 25 (which was ~85%
+# tech and moved together) with eight quality diversifiers across financials,
+# energy, industrials/defense, healthcare and staples — giving the relative-
+# strength / regime machinery somewhere to rotate when tech leadership fades.
+# This set backtested strictly better than the old 25 across 2018-2025 (OOS
+# Sharpe 1.96→2.21, return 174%→209%, max drawdown -12.0%→-11.4%, PF 1.59→
+# 1.66; reproduce via backtest_fastdaily.py). A wider 42-name cut that also
+# carried high-beta post-2021 IPOs (AFRM, UPST, SOFI, RBLX) tested worse (OOS
+# 1.68 / 152%) — those names whipsaw the 2×ATR trend stop — so they were
+# dropped. More names only widen the pool RS ranks over; concurrent risk stays
+# bounded by MAX_OPEN_POSITIONS / MAX_POSITION_PCT.
 MAG7 = ["AAPL", "MSFT", "AMZN", "META", "GOOGL", "TSLA", "NVDA"]
-GROWTH_TECH = ["AMD", "AVGO", "MU", "ORCL", "CRM", "NOW", "PLTR", "SNOW", "NFLX", "MRVL", "DELL"]
+GROWTH_TECH = ["AMD", "AVGO", "MU", "ORCL", "CRM", "NOW", "PLTR", "SNOW", "NFLX"]
 CYBERSEC = ["PANW", "CRWD"]
-FINTECH = ["COIN", "HOOD", "CRCL", "V", "SOFI", "AFRM", "UPST"]
-CONSUMER = ["SHOP", "UBER", "ABNB", "MELI", "COST", "LULU", "RBLX"]
-HEALTHCARE = ["UNH", "LLY", "NVO"]
-FINANCIALS = ["JPM", "BRK-B"]
+FINTECH = ["COIN", "HOOD", "CRCL", "V"]
+CONSUMER = ["SHOP", "UBER", "ABNB", "MELI", "COST"]
+HEALTHCARE = ["UNH", "LLY"]
+FINANCIALS = ["JPM"]
 ENERGY = ["XOM"]
 INDUSTRIALS = ["GE", "RTX"]
 DEFAULT_WATCHLIST = (
